@@ -1,0 +1,194 @@
+/* ==========================================================================
+   CarbonRoute X — Design tokens
+   Deep charcoal foundation, electric-green sustainability accent, restrained
+   cyan data accent. Every colour here has a job; none are decorative.
+   ========================================================================== */
+
+:root {
+  /* Surfaces — a cool slate ladder. Deliberately NOT black: near-black
+     reads as a toy console, while a lifted slate reads as instrumentation. */
+  --void:        #0d1420;
+  --deep:        #111a28;
+  --ink:         #152031;
+  --surface:     #1a2638;
+  --surface-2:   #202e43;
+  --raised:      #27374f;
+
+  --line:        #2c3c54;
+  --line-soft:   #243246;
+  --line-strong: #3d5270;
+
+  /* Type — higher contrast throughout; the old muted greys sat under 4.5:1. */
+  --text:        #f2f6fb;
+  --text-dim:    #c6d2e2;
+  --muted:       #a3b1c4;
+  --faint:       #7d8ca3;
+
+  /* Accents */
+  --green:       #34d99a;
+  --green-deep:  #1f6f4a;
+  --cyan:        #62c8f8;
+  --cyan-deep:   #1d5878;
+  --amber:       #f5c661;
+  --orange:      #ff9a4d;
+  --red:         #ff5f6d;
+  --violet:      #b78bff;
+  --pink:        #ff7a93;
+
+  /* Semantics */
+  --ok: var(--green);
+  --warn: var(--amber);
+  --bad: var(--red);
+  --info: var(--cyan);
+
+  /* Glass */
+  --glass:       rgba(21, 32, 49, 0.88);
+  --glass-hi:    rgba(32, 46, 67, 0.86);
+  --glass-line:  rgba(122, 206, 255, 0.18);
+  --blur:        blur(18px) saturate(1.25);
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 8px 28px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.03) inset;
+  --shadow-3: 0 24px 64px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.04) inset;
+  --glow-green: 0 0 0 1px rgba(62,224,143,.3), 0 0 24px rgba(62,224,143,.18);
+  --glow-cyan:  0 0 0 1px rgba(94,200,255,.3), 0 0 24px rgba(94,200,255,.16);
+
+  /* Geometry */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  /* Rhythm */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 28px; --sp-7: 40px;
+
+  --rail-left: 312px;
+  --rail-right: 336px;
+  --topbar-h: 56px;
+  --dock-h: 300px;
+
+  /* Type stacks — system fonts only, so the app works fully offline. */
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Inter, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono",
+               Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(.22,.61,.36,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 420ms;
+}
+
+/* High-contrast accommodation: strengthen every border and lift the text. */
+@media (prefers-contrast: more) {
+  :root {
+    --text: #ffffff;
+    --muted: #c3ccd8;
+    --faint: #98a3b2;
+    --line: #3a4a5e;
+    --line-strong: #56697f;
+    --glass: rgba(10, 15, 22, 0.96);
+    --glass-line: rgba(140, 210, 255, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 1ms; --dur-2: 1ms; --dur-3: 1ms; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------- reset */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+body { overflow: hidden; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; padding: 0; }
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+::selection { background: rgba(62,224,143,.28); }
+
+/* Scrollbars that belong to this interface rather than the OS. */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong); border-radius: 99px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: #3c4d61; background-clip: content-box; }
+
+/* ------------------------------------------------------- type utilities */
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dim { color: var(--muted); }
+.faint { color: var(--faint); }
+.up { color: var(--green); }
+.down { color: var(--red); }
+.nowrap { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* A skip link that is invisible until focused. */
+.skip-link {
+  position: absolute; top: -60px; left: var(--sp-3); z-index: 999;
+  background: var(--raised); color: var(--text);
+  padding: var(--sp-2) var(--sp-4); border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  transition: top var(--dur-2) var(--ease);
+}
+.skip-link:focus { top: var(--sp-3); }
