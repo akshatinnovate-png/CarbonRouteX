@@ -1,5 +1,5 @@
 /** Presentation-layer formatting. Pure functions, no DOM. */
-import { APP, WORLD } from '../config.js';
+import { APP } from '../config.js';
 
 const nf = (d) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
 const cache = new Map();
@@ -50,11 +50,10 @@ export const signedPct = (v, d = 1) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${num
 /** Relative change b vs a, guarded against a == 0. */
 export const delta = (a, b) => (Math.abs(a) < 1e-9 ? 0 : (b - a) / Math.abs(a));
 
-/** World km coordinates → pseudo lat/lon string, for the coordinate readout. */
-export function geo(x, y) {
-  const lat = WORLD.anchor.lat + (-y) / WORLD.kmPerDegLat;
-  const lon = WORLD.anchor.lon + x / WORLD.kmPerDegLon;
-  return `${Math.abs(lat).toFixed(4)}°${lat >= 0 ? 'N' : 'S'}  ${Math.abs(lon).toFixed(4)}°${lon >= 0 ? 'E' : 'W'}`;
+/** Real coordinates → a readable N/S, E/W string. */
+export function geo(lon, lat) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return '—';
+  return `${Math.abs(lat).toFixed(5)}°${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(5)}°${lon >= 0 ? 'E' : 'W'}`;
 }
 
 export const titleCase = (s) => s.replace(/(^|[\s_-])(\w)/g, (_, a, b) => (a === '_' || a === '-' ? ' ' : a) + b.toUpperCase());

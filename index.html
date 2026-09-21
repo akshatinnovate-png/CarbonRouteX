@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="CarbonRoute X — an AI logistics intelligence platform that simulates, optimises, explains and visualises how a delivery network should operate across time, cost, capacity, traffic, energy and carbon.">
-<title>CarbonRoute X — AI Logistics Intelligence</title>
+<meta name="description" content="CarbonRoute — an AI logistics command centre that plans a real delivery fleet over real roads, optimising time, cost and carbon together.">
+<title>CarbonRoute — AI Logistics Intelligence</title>
 
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b1018'/><path d='M7 21c4-9 14-9 18 0' stroke='%233ee08f' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='7' cy='21' r='3' fill='%235ec8ff'/><circle cx='25' cy='21' r='3' fill='%233ee08f'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23152031'/><path d='M7 21c4-9 14-9 18 0' stroke='%2334d99a' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='7' cy='21' r='3' fill='%2362c8f8'/><circle cx='25' cy='21' r='3' fill='%2334d99a'/></svg>">
 
 <link rel="stylesheet" href="styles/tokens.css">
 <link rel="stylesheet" href="styles/layout.css">
@@ -15,154 +15,73 @@
 </head>
 <body>
 
-<a class="skip-link" href="#command-center">Skip to controls</a>
+<a class="skip-link" href="#tabbar">Skip to navigation</a>
 
-<!-- Screen-reader live regions. Every state change the map shows visually is
-     also announced here, so the map is never the only way to know something. -->
+<!-- Screen-reader live regions. Everything the map shows visually is also
+     announced here, so the map is never the only way to know something. -->
 <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
-<!-- ===================== LANDING / INTRO ===================== -->
-<div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
-  <canvas id="intro-canvas" aria-hidden="true"></canvas>
-  <div class="intro-content">
-    <div class="intro-mark" aria-hidden="true">
-      <svg viewBox="0 0 64 64" fill="none">
-        <circle cx="32" cy="32" r="29" stroke="url(#ig)" stroke-width="1.2" opacity=".45"/>
-        <circle cx="32" cy="32" r="21" stroke="url(#ig)" stroke-width="1" opacity=".3"/>
-        <path d="M12 44C20 22 44 22 52 44" stroke="#34d99a" stroke-width="3.2" stroke-linecap="round"/>
-        <circle cx="12" cy="44" r="5" fill="#62c8f8"/>
-        <circle cx="52" cy="44" r="5" fill="#34d99a"/>
-        <circle cx="32" cy="26" r="3.4" fill="#f2f6fb"/>
-        <defs><linearGradient id="ig" x1="0" y1="0" x2="64" y2="64">
-          <stop stop-color="#62c8f8"/><stop offset="1" stop-color="#34d99a"/>
-        </linearGradient></defs>
-      </svg>
-    </div>
-    <p class="intro-tagline">AI Logistics Intelligence</p>
-    <h1 class="intro-title" id="intro-title">Carbon<b>Route</b> X</h1>
-    <p class="intro-claim"><b>Optimise the network.</b><br>Not just the route.</p>
+<!-- ============ SIGN-IN / SETUP ============ -->
+<div class="onboarding" id="onboarding" role="dialog" aria-modal="true" aria-label="Sign in and set up" hidden></div>
 
-    <div class="intro-boot" role="status" aria-live="polite">
-      <div class="intro-steps" id="intro-steps" aria-hidden="true"></div>
-      <div class="intro-bar"><i id="intro-bar-fill"></i></div>
-      <div class="intro-readout">
-        <span id="intro-phase">Initialising engines</span>
-        <span class="mono" id="intro-pct">0%</span>
-      </div>
-    </div>
-
-    <dl class="intro-stats" id="intro-stats" aria-label="Generated world"></dl>
-
-    <div class="intro-actions">
-      <button class="btn btn--primary btn--lg" id="intro-enter">Enter command centre</button>
-      <button class="btn btn--lg" id="intro-demo">Run the disruption demo</button>
-    </div>
-    <p class="intro-note" id="intro-note">
-      Building the network&hellip;
-    </p>
-  </div>
-</div>
-
-<!-- ===================== APP ===================== -->
+<!-- ============ APP ============ -->
 <div id="app" aria-hidden="true">
 
-  <!-- ---------- TOPBAR ---------- -->
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32" fill="none">
-          <path d="M6 22c4-10 16-10 20 0" stroke="#3ee08f" stroke-width="2.6" stroke-linecap="round"/>
-          <circle cx="6" cy="22" r="3.2" fill="#5ec8ff"/>
-          <circle cx="26" cy="22" r="3.2" fill="#3ee08f"/>
-          <circle cx="16" cy="13.5" r="2.2" fill="#e8eef6"/>
+          <path d="M6 22c4-10 16-10 20 0" stroke="#34d99a" stroke-width="2.8" stroke-linecap="round"/>
+          <circle cx="6" cy="22" r="3.2" fill="#62c8f8"/>
+          <circle cx="26" cy="22" r="3.2" fill="#34d99a"/>
+          <circle cx="16" cy="13.5" r="2.2" fill="#f2f6fb"/>
         </svg>
       </span>
       <span class="brand-text">
-        <span class="brand-name">Carbon<b>Route</b> X</span>
+        <span class="brand-name">Carbon<b>Route</b></span>
         <span class="brand-sub">Logistics Command</span>
       </span>
     </div>
 
-    <span class="demo-badge" title="All telemetry, traffic and emissions figures in this application are simulated from a deterministic model. Nothing here is a live real-world measurement.">DEMO / SIMULATION</span>
+    <span class="chip" id="service-chip" title="Routing service status"><i class="dot"></i>Checking roads…</span>
 
     <div class="topbar-spacer"></div>
 
-    <div class="clock-readout" id="sim-clock" title="Simulated operations clock">
+    <div class="clock-readout" id="sim-clock" title="Plan clock — advances the published schedule">
       <span class="t">08:00</span>
-      <span class="d">OPS CLOCK</span>
+      <span class="d">PAUSED</span>
     </div>
 
-    <div class="segmented" id="speed-control" role="group" aria-label="Simulation speed"></div>
+    <div class="segmented" id="speed-control" role="group" aria-label="Clock speed"></div>
 
     <div class="ai-status" id="ai-status" data-state="idle">
       <span class="pip" aria-hidden="true"></span>
       <span class="txt">System nominal</span>
     </div>
 
-    <button class="btn btn--ghost btn--sm" id="help-btn" aria-label="Keyboard shortcuts and help" title="Keyboard shortcuts (?)">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+    <button class="btn btn--ghost btn--sm" id="help-btn" aria-label="Keyboard shortcuts and help" title="Help (?)">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <circle cx="8" cy="8" r="6.5"/><path d="M6.3 6.2a1.8 1.8 0 113 1.3c-.7.5-1.3.9-1.3 1.8"/><circle cx="8" cy="12" r=".6" fill="currentColor" stroke="none"/>
       </svg>
       Help
     </button>
 
-    <div class="profile-chip">
-      <span class="av" aria-hidden="true">OC</span>
-      <span class="who">Ops Control<small>NETWORK LEAD</small></span>
-    </div>
+    <div class="profile-chip" id="account-chip" hidden></div>
   </header>
 
-  <!-- ---------- SHELL ---------- -->
-  <div class="shell">
+  <nav class="tabbar" id="tabbar" role="tablist" aria-label="Sections"></nav>
 
-    <!-- LEFT: COMMAND CENTER -->
-    <aside class="rail rail--left" id="command-center" aria-label="Command centre">
-      <div class="rail-scroll" id="command-scroll"></div>
-    </aside>
-
-    <!-- CENTER: LIVE MAP -->
-    <main class="stage" id="stage">
-      <canvas id="map-canvas" tabindex="0" role="application"
-              aria-label="Live logistics map. Use arrow keys to pan, plus and minus to zoom. A full text equivalent of every entity on this map is available in the Fleet and Analytics panels."></canvas>
-
-      <div class="stage-overlay">
-        <div class="stage-top">
-          <div class="hero-stats" id="hero-stats" role="group" aria-label="Fleet key figures"></div>
-          <div style="flex:1"></div>
-          <div class="map-tools" id="map-tools"></div>
-        </div>
-
-        <div></div>
-
-        <div class="stage-bottom">
-          <div id="map-legend"></div>
-          <div id="map-status"></div>
-        </div>
-      </div>
-
-      <div id="map-tip" class="map-tip" hidden></div>
-    </main>
-
-    <!-- RIGHT: FLEET TELEMETRY / INSPECTOR -->
-    <aside class="rail rail--right" id="inspector" aria-label="Fleet telemetry and inspector">
-      <div class="rail-scroll" id="inspector-scroll"></div>
-    </aside>
-  </div>
-
-  <!-- ---------- DOCK ---------- -->
-  <section class="dock" id="dock" data-size="normal" aria-label="Analytics and operations">
-    <div class="dock-tabs" id="dock-tabs" role="tablist" aria-label="Analysis views"></div>
-    <div class="dock-body" id="dock-body"></div>
-  </section>
-
-  <!-- ---------- MOBILE NAV ---------- -->
-  <nav class="mobile-nav" id="mobile-nav" aria-label="Sections"></nav>
+  <main class="pages" id="pages"></main>
 </div>
+
+<!-- The map canvas lives outside the page host so it is never destroyed and
+     recreated when the operator switches tabs; the map page adopts it. -->
+<canvas id="map-canvas" tabindex="0" role="application"
+        aria-label="Live logistics map over OpenStreetMap. Arrow keys pan when focused, plus and minus zoom. The Orders tab is a complete text equivalent of everything shown here."></canvas>
 
 <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
-<!-- Keyboard help -->
 <dialog class="sheet" id="help-sheet" aria-labelledby="help-title">
   <div class="panel-head">
     <h2 id="help-title">Keyboard &amp; interaction</h2>
@@ -171,34 +90,38 @@
   </div>
   <div class="panel-body">
     <div class="key-rows">
+      <kbd>1</kbd><span class="d">Map</span>
+      <kbd>2</kbd><span class="d">Optimise</span>
+      <kbd>3</kbd><span class="d">Simulation</span>
+      <kbd>4</kbd><span class="d">Depots</span>
+      <kbd>5</kbd><span class="d">Fleet</span>
+      <kbd>6</kbd><span class="d">Orders</span>
+      <kbd>7</kbd><span class="d">Analytics</span>
+      <kbd>8</kbd><span class="d">Carbon</span>
+      <kbd>9</kbd><span class="d">Events</span>
       <kbd>O</kbd><span class="d">Optimise the fleet</span>
-      <kbd>S</kbd><span class="d">Open simulation / digital twin</span>
-      <kbd>R</kbd><span class="d">Fit all routes</span>
-      <kbd>F</kbd><span class="d">Fit the fleet</span>
-      <kbd>0</kbd><span class="d">Reset the view to the whole network</span>
+      <kbd>Space</kbd><span class="d">Play / pause the plan clock</span>
       <kbd>+</kbd><span class="d">Zoom in</span>
       <kbd>&minus;</kbd><span class="d">Zoom out</span>
-      <kbd>Space</kbd><span class="d">Play / pause the operations clock</span>
       <kbd>&larr; &uarr; &darr; &rarr;</kbd><span class="d">Pan the map (when the map has focus)</span>
-      <kbd>/</kbd><span class="d">Jump to search</span>
-      <kbd>Esc</kbd><span class="d">Close the panel / clear the selection</span>
+      <kbd>Esc</kbd><span class="d">Close a dialog / clear the selection</span>
       <kbd>?</kbd><span class="d">This help</span>
     </div>
     <div class="hr"></div>
     <p class="dim" style="font-size:12px;line-height:1.6;margin:0">
-      Shortcuts are ignored while you are typing in a field. The map is never the only
-      route to information: the Fleet panel, the Analytics tables and the Event stream
-      carry the same data as text, and every change is announced to screen readers.
+      Shortcuts are ignored while you are typing. The map is never the only route to
+      information: the Orders tab carries every stop as sortable text, and all state
+      changes are announced to screen readers.
     </p>
   </div>
 </dialog>
 
 <noscript>
-  <div style="padding:40px;max-width:60ch;margin:0 auto;font-family:sans-serif">
-    <h1>CarbonRoute X</h1>
-    <p>This application is a client-side optimisation and visualisation engine and
-    requires JavaScript. No data leaves your browser; the entire demo dataset is
-    generated locally from a fixed seed.</p>
+  <div style="padding:40px;max-width:60ch;margin:0 auto;font-family:sans-serif;color:#f2f6fb;background:#0d1420">
+    <h1>CarbonRoute</h1>
+    <p>This application is a client-side optimisation and mapping engine and requires
+    JavaScript. Your data stays in your browser; the only network requests are to
+    public map-tile, routing and address services.</p>
   </div>
 </noscript>
 

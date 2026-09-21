@@ -1,43 +1,19 @@
 /**
- * CarbonRoute X — Global configuration.
+ * CarbonRoute — Global configuration.
  *
- * Every physical constant used by the energy / emissions / cost engines lives
- * here so that the model is auditable in one place. Values are order-of-magnitude
- * realistic but this is a DEMO dataset: see README "Responsible AI".
+ * Every physical constant used by the energy, emissions and cost engines lives
+ * here so the model is auditable in one place. Geography, roads and travel
+ * times are NOT configured here: those come from real OpenStreetMap data via
+ * the routing service (see src/services/).
  */
 
 export const APP = {
-  name: 'CarbonRoute X',
+  name: 'CarbonRoute',
   tagline: 'AI Logistics Intelligence',
-  version: '1.0.0',
-  dataMode: 'DEMO / SIMULATION',
-  storageKey: 'carbonroute-x:v1',
+  version: '2.0.0',
   currency: '₹', // INR
-};
-
-/** Deterministic seed for the whole demo world. */
-export const SEED = 20260920;
-
-/* ------------------------------------------------------------------ */
-/* World geometry                                                      */
-/* ------------------------------------------------------------------ */
-
-export const WORLD = {
-  // Working plane is metric kilometres. Origin is the metro centre.
-  widthKm: 56,
-  heightKm: 40,
-  // Pseudo-geographic anchor used purely for human-readable coordinates.
-  anchor: { lat: 17.385, lon: 78.4867, name: 'Metro Region' },
-  kmPerDegLat: 110.574,
-  kmPerDegLon: 105.6, // at ~17.4 deg latitude
-};
-
-/** Road classes: speed in km/h, and a toll rate per km. */
-export const ROAD_CLASS = {
-  highway: { key: 'highway', label: 'Highway', speed: 88, width: 3.4, toll: 1.9, grade: 0.010, capacity: 2400 },
-  arterial: { key: 'arterial', label: 'Arterial', speed: 56, width: 2.1, toll: 0.0, grade: 0.014, capacity: 1400 },
-  collector: { key: 'collector', label: 'Collector', speed: 38, width: 1.3, toll: 0.0, grade: 0.018, capacity: 800 },
-  local: { key: 'local', label: 'Local', speed: 26, width: 0.8, toll: 0.0, grade: 0.022, capacity: 400 },
+  /** Where the map opens before the operator has chosen an operating region. */
+  defaultRegion: { label: 'Hyderabad, India', lon: 78.4867, lat: 17.385, zoom: 11 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -139,7 +115,7 @@ export const OPTIMIZER = {
   endTemp: 0.0035,
   restarts: 2,
   serviceMinutesPerStop: 6,
-  serviceMinutesPerKg: 0.0016,
+  serviceMinutesPerKg: 0.0016,   // extra dock-loading minutes per kg
   depotLoadMinutes: 12,
   lateMinutePenalty: 4.2,   // objective units per minute late (soft constraint)
   unservedPenalty: 900,     // objective units for dropping an order
@@ -171,25 +147,18 @@ export const SIM = {
 
 export const RENDER = {
   maxDpr: 2,
-  minZoom: 0.6,
-  maxZoom: 8,
   flowSpeed: 0.055,
-  heatmapCell: 14,
-  particleBudget: 520,
 };
 
 export const LAYERS = [
-  { key: 'roads',       label: 'Road Network',       on: true,  hotkey: null },
-  { key: 'regions',     label: 'Regions',            on: true },
-  { key: 'traffic',     label: 'Traffic',            on: true },
-  { key: 'routes',      label: 'Routes',             on: true },
-  { key: 'alternates',  label: 'Alternative Routes', on: false },
-  { key: 'vehicles',    label: 'Vehicles',           on: true },
-  { key: 'deliveries',  label: 'Deliveries',         on: true },
-  { key: 'warehouses',  label: 'Warehouses',         on: true },
-  { key: 'emissions',   label: 'Emissions Heatmap',  on: false },
-  { key: 'energy',      label: 'Energy Demand',      on: false },
-  { key: 'risk',        label: 'Risk / Exceptions',  on: false },
+  { key: 'routes',     label: 'Planned routes',    on: true },
+  { key: 'vehicles',   label: 'Vehicles',          on: true },
+  { key: 'deliveries', label: 'Deliveries',        on: true },
+  { key: 'depots',     label: 'Depots',            on: true },
+  { key: 'labels',     label: 'Stop labels',       on: true },
+  { key: 'emissions',  label: 'Emissions heatmap', on: false },
+  { key: 'incidents',  label: 'Incidents',         on: true },
+  { key: 'risk',       label: 'Risk / exceptions', on: false },
 ];
 
 export const PRIORITY = {

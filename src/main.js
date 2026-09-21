@@ -2,44 +2,25 @@
  * INIT
  *
  * Boot order:
- *   1. Show the landing immediately (it draws nothing until the world exists).
- *   2. Build the world, dataset and engines; publish a baseline plan.
- *   3. Mount the command centre, map, inspector and dock.
- *   4. Hand control over — and optionally run the disruption demo.
- *
- * The application is usable the moment the store is ready; nothing waits on an
- * animation.
+ *   1. Load the local workspace and start the services.
+ *   2. Bring up the real map immediately, so there is never a blank screen.
+ *   3. If this is a first run, show sign-in and the setup wizard.
+ *   4. Otherwise mount the shell, fit the map to the network, and optimise.
  */
 
-import { APP, SIM } from './config.js';
+import { APP } from './config.js';
 import { EV, emit, on } from './core/bus.js';
 import { store } from './core/store.js';
-import { storageAvailable } from './core/storage.js';
-import { MapEngine } from './render/mapEngine.js';
-import { initHud, initToasts } from './ui/hud.js';
-import { initCommandCenter } from './ui/commandCenter.js';
-import { initInspector } from './ui/inspector.js';
-import { initDock } from './ui/dock.js';
-import { initIntro } from './ui/intro.js';
+import { TileMap } from './render/tileMap.js';
+import { makeProvider, customProvider, DEFAULT_PROVIDER } from './services/tiles.js';
+import { installOverlays } from './render/overlays.js';
+import { initShell, initTopbar } from './ui/shell.js';
+import { initOnboarding } from './ui/onboarding.js';
 import { initKeyboard } from './input/keyboard.js';
-import { el, mount, announce, prefersReducedMotion } from './util/dom.js';
+import { el, mount, announce } from './util/dom.js';
 import { icon } from './ui/icons.js';
-import { dur, kg as fkg, pct } from './util/format.js';
 
-const boot = async () => {
-  let map = null;
-  let dock = null;
-  let command = null;
-
-  const intro = initIntro(store, (runDemo) => {
-    map?.resize();
-    map?.start();
-    // Start the operations clock only once the user is actually watching it.
-    store.setSpeed(SIM.defaultSpeedMultiplier);
-    document.getElementById('map-canvas')?.focus({ preventScroll: true });
-    if (runDemo) setTimeout(() => runKillerDemo(), 700);
-  });
-
+async function boot() {
   initToasts();
 
   try {
@@ -52,166 +33,137 @@ const boot = async () => {
   /* ------------------------------------------------------------ map */
 
   const canvas = document.getElementById('map-canvas');
-  map = new MapEngine(canvas, store);
+  const settings = store.settings;
+  const provider = settings.tileProvider === 'custom' && settings.customTileUrl
+    ? customProvider(settings.customTileUrl)
+    : makeProvider(settings.tileProvider || DEFAULT_PROVIDER);
+
+  const map = new TileMap(canvas, { provider });
+  installOverlays(map, store);
+
+  const region = store.workspace.region || APP.defaultRegion;
+  map.setView(region.lon, region.lat, region.zoom || 11, { animate: false });
   map.resize();
-  // Render one frame behind the intro so the command centre is never blank.
-  map.draw();
+  map.start();
 
-  /* ------------------------------------------------------------ ui */
-
-  const hud = initHud(store, map);
-  command = initCommandCenter(store, map);
-  const inspector = initInspector(store, map);
-  dock = initDock(store);
-  const help = initHelp();
-  initKeyboard(store, { map, dock, command, help });
-  initMobileNav(dock);
-
-  if (!storageAvailable) {
-    emit(EV.TOAST, {
-      message: 'Browser storage is unavailable, so objective weights and layer choices will not persist between visits.',
-      tone: 'info', duration: 6000,
-    });
+  // The map is a view: it must repaint whenever anything it draws changes.
+  for (const evt of [EV.PLAN_CHANGED, EV.ENTITIES_CHANGED, EV.SELECT, EV.HOVER,
+    EV.LAYERS_CHANGED, EV.SCENARIO_CHANGED, EV.ORDERS_CHANGED]) {
+    on(evt, () => map.invalidate());
   }
+  // The store owns the clock; the map loop is what advances it.
+  let lastTick = performance.now();
+  map.addOverlay(() => {
+    const now = performance.now();
+    store.tick(Math.min((now - lastTick) / 1000, 0.25));
+    lastTick = now;
+  });
 
-  // First real optimisation, so the command centre opens on an optimised plan
-  // rather than the naive baseline. The baseline is retained for comparison.
-  await store.optimizeFleet({ trigger: 'Initial network optimisation', label: 'Optimised plan' });
-  map.fitRoutes();
+  on(EV.SETTINGS_CHANGED, (s) => {
+    const p = s.tileProvider === 'custom' && s.customTileUrl
+      ? customProvider(s.customTileUrl)
+      : makeProvider(s.tileProvider || DEFAULT_PROVIDER);
+    map.setProvider(p);
+  });
 
-  /* ----------------------------------------------------- demo script */
+  /* ---------------------------------------------------------- shell */
 
-  /**
-   * THE KILLER DEMO
-   * Traffic disruption -> impact calculated -> fleet re-optimised -> the
-   * measured difference, and the reasons behind it. Every step is a real call
-   * into the engines; the only thing scripted is the timing.
-   */
-  async function runKillerDemo() {
-    if (store.optimizing) return;
-    dock.show('simulation');
-    emit(EV.TOAST, { message: 'Demo: traffic disruption detected on the network.', tone: 'bad', duration: 3600 });
-    announce('Demo running: traffic disruption detected');
+  const shell = initShell(store, map);
+  initTopbar(store, shell);
+  initKeyboard(store, { map, shell, help: initHelp() });
+  on(EV.VIEW_CHANGED, (key) => { if (shell.active !== key) shell.show(key); });
 
-    store.setScenarioTraffic('plus60');
-    store.addIncidentNear(0, 0, 1.25, 10);
-    const busiest = store.plan.routes
-      .filter((r) => r.orderIds.length)
-      .sort((a, b) => b.orderIds.length - a.orderIds.length)[0];
-    if (busiest) store.closeRouteCorridor(busiest.id);
+  /* ----------------------------------------------------- onboarding */
 
-    await wait(1100);
-    const before = store.plan;
-    const plan = await store.replan({ trigger: 'Demo — traffic disruption' });
-    if (!plan) return;
+  const onboarding = initOnboarding(store, {
+    onComplete: async () => {
+      shell.show('map');
+      fitEverything(map, store);
+      await store.optimizeFleet({ trigger: 'First plan', label: 'Optimised plan' });
+      fitRoutes(map, store);
+    },
+  });
 
-    map.fitRoutes();
-    dock.show('simulation');
-    const cmp = store.scenarioComparison;
-    if (cmp) {
-      const co2 = cmp.rows.find((r) => r.key === 'co2');
-      const time = cmp.rows.find((r) => r.key === 'minutes');
-      emit(EV.TOAST, {
-        message: `Replanned: CO₂e ${co2.improved ? 'down' : 'up'} ${fkg(Math.abs(co2.delta), 2)}, `
-          + `fleet time ${time.improved ? 'down' : 'up'} ${dur(Math.abs(time.delta))}, `
-          + `on-time ${pct(plan.metrics.onTimeRate, 1)}.`,
-        tone: co2.improved ? 'good' : 'info',
-        duration: 8000,
-      });
+  if (!store.signedIn || !store.onboarded) {
+    onboarding.show();
+  } else {
+    document.getElementById('app').removeAttribute('aria-hidden');
+    fitEverything(map, store);
+    if (store.depots.length && store.vehicles.length && store.openOrders().length) {
+      await store.optimizeFleet({ trigger: 'Session start', label: 'Optimised plan' });
+      fitRoutes(map, store);
     }
+    announce('Command centre ready');
   }
 
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  // Expose a small surface for debugging and for the README's console recipes.
-  window.CarbonRoute = { store, map, dock, command, runKillerDemo, version: APP.version };
-};
+  window.CarbonRoute = { store, map, shell, version: APP.version };
+}
 
 /* ------------------------------------------------------------------ */
-/* Help dialog                                                         */
+
+function fitEverything(map, store) {
+  const pts = [
+    ...store.depots.map((d) => ({ lon: d.lon, lat: d.lat })),
+    ...store.orders.map((o) => ({ lon: o.lon, lat: o.lat })),
+  ];
+  if (pts.length) map.fit(pts, { padding: 90, animate: false });
+}
+
+function fitRoutes(map, store) {
+  const pts = [];
+  for (const r of store.plan?.routes || []) {
+    for (const s of r.stops) pts.push({ lon: s.lon, lat: s.lat });
+  }
+  for (const d of store.depots) pts.push({ lon: d.lon, lat: d.lat });
+  if (pts.length) map.fit(pts, { padding: 110 });
+}
+
 /* ------------------------------------------------------------------ */
 
 function initHelp() {
   const sheet = document.getElementById('help-sheet');
   const open = () => { if (!sheet.open) sheet.showModal(); };
   const close = () => { if (sheet.open) sheet.close(); };
-  document.getElementById('help-btn').addEventListener('click', open);
-  document.getElementById('help-close').addEventListener('click', close);
+  document.getElementById('help-btn')?.addEventListener('click', open);
+  document.getElementById('help-close')?.addEventListener('click', close);
   sheet.addEventListener('click', (e) => { if (e.target === sheet) close(); });
   return { open, close, toggle: () => (sheet.open ? close() : open()), isOpen: () => sheet.open };
 }
 
-/* ------------------------------------------------------------------ */
-/* Mobile navigation                                                   */
-/* ------------------------------------------------------------------ */
-
-function initMobileNav(dock) {
-  const nav = document.getElementById('mobile-nav');
-  const commandRail = document.getElementById('command-center');
-  const inspectorRail = document.getElementById('inspector');
-  const dockEl = document.getElementById('dock');
-
-  const VIEWS = [
-    { key: 'map', label: 'Map', icon: 'map' },
-    { key: 'command', label: 'Optimise', icon: 'bolt' },
-    { key: 'fleet', label: 'Fleet', icon: 'fleet' },
-    { key: 'analysis', label: 'Analysis', icon: 'chart' },
-  ];
-
-  let current = 'map';
-  const buttons = VIEWS.map((v) => el('button', {
-    type: 'button', 'aria-current': String(current === v.key),
-    dataset: { view: v.key },
-    onclick: () => setView(v.key),
-  }, el('span', { html: icon(v.icon, 17), style: { display: 'flex' } }), el('span', { text: v.label })));
-  mount(nav, ...buttons);
-
-  function setView(key) {
-    current = key;
-    commandRail.classList.toggle('mobile-active', key === 'command');
-    inspectorRail.classList.toggle('mobile-active', key === 'fleet');
-    dockEl.classList.toggle('mobile-active', key === 'analysis');
-    for (const b of buttons) b.setAttribute('aria-current', String(b.dataset.view === key));
-    announce(`${VIEWS.find((v) => v.key === key).label} view`);
-  }
-
-  // Selecting something on the map should surface its detail on small screens.
-  on(EV.SELECT, ({ kind }) => {
-    if (window.innerWidth > 860 || !kind) return;
-    // Give the map a beat to animate its focus before covering it.
-    setTimeout(() => setView('fleet'), 420);
+function initToasts() {
+  const host = document.getElementById('toast-stack');
+  on(EV.TOAST, ({ message, tone = 'info', duration = 4500 }) => {
+    const node = el('div.toast', { dataset: { tone } },
+      el('span', { html: icon(tone === 'bad' ? 'alert' : tone === 'good' ? 'check' : 'info') }),
+      el('span', { text: message }));
+    host.append(node);
+    announce(message, tone === 'bad');
+    setTimeout(() => {
+      node.style.transition = 'opacity 260ms, transform 260ms';
+      node.style.opacity = '0';
+      node.style.transform = 'translateY(6px)';
+      setTimeout(() => node.remove(), 280);
+    }, duration);
   });
-
-  return { setView };
 }
-
-/* ------------------------------------------------------------------ */
-/* Fatal error surface                                                 */
-/* ------------------------------------------------------------------ */
 
 function showFatal(err) {
-  console.error('[CarbonRoute X] fatal', err);
-  const intro = document.getElementById('intro');
-  const note = document.getElementById('intro-note');
-  if (note) {
-    note.innerHTML = '';
-    note.append(el('strong', { text: 'The simulation failed to start.' }),
-      el('br'),
-      el('span', { text: err?.message || 'Unknown error.' }),
-      el('br'),
-      el('span', { text: 'Reload to try again. If it persists, your browser may not support the Canvas or ES module features this application needs.' }));
-    note.style.color = 'var(--red)';
-  }
-  const enter = document.getElementById('intro-enter');
-  const demo = document.getElementById('intro-demo');
-  if (enter) { enter.disabled = true; enter.textContent = 'Unavailable'; }
-  if (demo) demo.hidden = true;
+  console.error('[CarbonRoute] fatal', err);
+  const host = document.getElementById('onboarding');
+  host.hidden = false;
+  mount(host, el('div.ob-shell', null,
+    el('main.ob-main', null,
+      el('div.ob-panel', null,
+        el('div.ob-head', null,
+          el('h1', { text: 'CarbonRoute could not start' }),
+          el('p', { text: err?.message || 'An unknown error occurred while loading the workspace.' })),
+        el('p.basis', {
+          text: 'Reloading usually clears this. If it persists, your browser may not support the ES module or Canvas features this application needs.',
+        }),
+        el('button.btn.btn--primary', { type: 'button', text: 'Reload', onclick: () => location.reload() })))));
 }
 
-/* ------------------------------------------------------------------ */
-
 window.addEventListener('error', (e) => {
-  // Surface engine errors instead of letting the app fail silently.
   if (!store.ready) return;
   emit(EV.TOAST, { message: `Something went wrong: ${e.message}`, tone: 'bad', duration: 6000 });
 });

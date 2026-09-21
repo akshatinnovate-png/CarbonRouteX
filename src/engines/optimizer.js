@@ -24,9 +24,9 @@
  */
 
 import { OPTIMIZER, SIM, VEHICLE_TYPES, PRESETS } from '../config.js';
-import { clamp, rng, shuffle, dist } from '../util/math.js';
-import { finalisePlan, referenceFrom, scorePlan } from './plan.js';
-import { normaliseWeights } from './route.js';
+import { clamp, rng, shuffle } from '../util/math.js';
+import { finalisePlan, referenceFrom, scorePlan, normaliseWeights } from './plan.js';
+import { haversineKm } from '../render/mercator.js';
 
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -59,7 +59,7 @@ export class Optimizer {
       // Nearest depot, then the least-loaded vehicle at that depot with room.
       let bestDepot = null, bestD = Infinity;
       for (const d of this.ctx.depots) {
-        const dd = dist(d.x, d.y, o.x, o.y);
+        const dd = haversineKm(d.lon, d.lat, o.lon, o.lat);
         if (dd < bestD) { bestD = dd; bestDepot = d; }
       }
       const pool = usable.filter((v) => v.depotId === bestDepot.id);
@@ -136,7 +136,7 @@ export class Optimizer {
     const ranked = vehicles
       .map((v) => {
         const d = this.ctx.depotsById.get(v.depotId);
-        return { v, d: dist(d.x, d.y, order.x, order.y) };
+        return { v, d: d ? haversineKm(d.lon, d.lat, order.lon, order.lat) : Infinity };
       })
       .sort((a, b) => a.d - b.d)
       .slice(0, 5)
@@ -442,9 +442,8 @@ export class Optimizer {
       const stats = {
         elapsedMs: Math.round(performance.now() - t0),
         routeEvaluations: this.plan.evaluations,
-        pathQueries: this.plan.router.stats.queries,
-        cacheHitRate: this.plan.router.stats.queries
-          ? this.plan.router.stats.hits / this.plan.router.stats.queries : 0,
+        matrixSize: this.plan.matrix.size,
+        matrixEstimated: this.plan.matrix.estimated,
         iterations,
         improvement: base.score > 0 ? (base.score - plan.score) / base.score : 0,
       };

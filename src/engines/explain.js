@@ -66,7 +66,7 @@ export function comparePlans(before, after, { labelBefore = 'Before', labelAfter
     rows,
     gains, losses,
     labelBefore, labelAfter,
-    basis: `Both plans evaluated on the same road graph, traffic field and order book; ${num(after.routes.length)} routes re-costed leg by leg.`,
+    basis: `Both plans evaluated on the same road-distance matrix, traffic model and order book; ${num(after.routes.length)} routes re-costed leg by leg.`,
   };
 }
 
@@ -117,13 +117,20 @@ export function explainRoute(route, context = {}) {
     });
   }
 
-  // Congestion exposure.
+  // Congestion exposure. `worstCongestion` is a travel-time multiplier over
+  // free flow, so 1.0 means the route is modelled to run at road speed.
   if (route.worstCongestion != null) {
-    const c = route.worstCongestion;
-    if (c < 0.6) {
-      drivers.push({ sign: '+', label: 'low predicted congestion', magnitude: 1 - c, detail: `peak link load ${pct(c / 2.6, 0)} of the modelled jam threshold` });
-    } else if (c > 1.0) {
-      drivers.push({ sign: '-', label: 'congested corridor', magnitude: Math.min(1, c / 2.6), detail: `peak link load ${pct(c / 2.6, 0)} of the modelled jam threshold` });
+    const over = route.worstCongestion - 1;
+    if (over < 0.12) {
+      drivers.push({
+        sign: '+', label: 'low modelled congestion', magnitude: 1 - over,
+        detail: `worst leg runs ${pct(Math.max(over, 0), 0)} over free-flow travel time`,
+      });
+    } else if (over > 0.35) {
+      drivers.push({
+        sign: '-', label: 'congested corridor', magnitude: Math.min(1, over),
+        detail: `worst leg runs ${pct(over, 0)} over free-flow travel time`,
+      });
     }
   }
 
@@ -171,7 +178,7 @@ export function explainRoute(route, context = {}) {
   const summary = buildRouteSummary(route, pros, cons, dominant);
   return {
     summary, drivers, pros, cons, dominant,
-    basis: `Computed from ${route.legs?.length ?? 0} road links under the current traffic field, the vehicle's consumption curve and the live objective weights.`,
+    basis: `Computed from ${route.legs?.length ?? 0} road legs using real routing distances, the modelled traffic multiplier, the vehicle's consumption curve and the live objective weights.`,
   };
 }
 
@@ -266,7 +273,9 @@ export function explainReplan(before, after, { trigger, weights } = {}) {
 
 export function explainCarbon(plan) {
   const legs = [];
-  for (const r of plan.routes) for (const leg of r.legs || []) for (const l of leg.legs || []) legs.push({ factors: l.factors, emissions: l.co2 });
+  for (const r of plan.routes) {
+    for (const leg of r.legs || []) legs.push({ factors: leg.factors, emissions: leg.co2 });
+  }
   const buckets = attributeEmissions(legs);
   const total = Object.values(buckets).reduce((a, b) => a + b, 0) || 1;
   const parts = [
@@ -280,7 +289,7 @@ export function explainCarbon(plan) {
   return {
     parts, total, addressable,
     verdict: `${pct(addressable / total, 1)} of the plan's estimated CO₂e comes from factors the optimiser can act on — routing around congestion, sequencing payload, and avoiding gradient.`,
-    basis: `Attributed across ${num(legs.length)} road-link traversals by decomposing each link's load, speed and grade multipliers.`,
+    basis: `Attributed across ${num(legs.length)} road legs by decomposing each leg's load, speed and gradient multipliers.`,
   };
 }
 
