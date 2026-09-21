@@ -5,27 +5,31 @@
  * text-entry context, and none of them intercept a browser or assistive-tech
  * chord (anything with Ctrl, Meta or Alt is left alone).
  *
- * Arrow-key panning is scoped to the map: it only fires when the canvas itself
- * has focus, so arrow keys keep working normally everywhere else.
+ * Arrow-key panning is scoped to the map canvas, so arrow keys keep working
+ * normally in tables and forms.
  */
 
 import { isTypingTarget, announce } from '../util/dom.js';
 import { EV, emit } from '../core/bus.js';
 
-export function initKeyboard(store, { map, dock, command, help }) {
+const TAB_KEYS = {
+  1: 'map', 2: 'optimize', 3: 'simulation', 4: 'depots',
+  5: 'fleet', 6: 'orders', 7: 'analytics', 8: 'carbon', 9: 'events',
+};
+
+export function initKeyboard(store, { map, shell, help }) {
   const held = new Set();
   let panRaf = 0;
 
   function panLoop() {
-    const step = 22 * (held.has('Shift') ? 3 : 1);
+    const step = 26 * (held.has('Shift') ? 3 : 1) * map.dpr;
     let dx = 0, dy = 0;
     if (held.has('ArrowLeft')) dx += step;
     if (held.has('ArrowRight')) dx -= step;
     if (held.has('ArrowUp')) dy += step;
     if (held.has('ArrowDown')) dy -= step;
     if (dx || dy) {
-      map.camera.panBy(dx * map.dpr, dy * map.dpr);
-      map.staticKey = null;
+      map.panByPixels(dx, dy);
       panRaf = requestAnimationFrame(panLoop);
     } else {
       panRaf = 0;
@@ -39,8 +43,7 @@ export function initKeyboard(store, { map, dock, command, help }) {
       return;
     }
 
-    const mapFocused = document.activeElement === map.canvas;
-    if (mapFocused && e.key.startsWith('Arrow')) {
+    if (document.activeElement === map.canvas && e.key.startsWith('Arrow')) {
       e.preventDefault();
       held.add(e.key);
       if (e.shiftKey) held.add('Shift');
@@ -48,52 +51,36 @@ export function initKeyboard(store, { map, dock, command, help }) {
       return;
     }
 
+    if (TAB_KEYS[e.key]) {
+      e.preventDefault();
+      shell.show(TAB_KEYS[e.key]);
+      return;
+    }
+
     switch (e.key) {
       case 'o': case 'O':
         e.preventDefault();
-        command.runOptimize();
+        store.optimizeFleet({ trigger: 'Keyboard shortcut' });
         break;
       case 's': case 'S':
         e.preventDefault();
-        dock.show('simulation');
-        announce('Simulation mode');
+        shell.show('simulation');
         break;
-      case 'r': case 'R':
+      case 'm': case 'M':
         e.preventDefault();
-        map.fitRoutes();
-        announce('View fitted to all routes');
-        break;
-      case 'f': case 'F':
-        e.preventDefault();
-        map.fitFleet();
-        announce('View fitted to the fleet');
-        break;
-      case '0':
-        e.preventDefault();
-        map.fitWorld();
-        announce('View reset');
+        shell.show('map');
         break;
       case '+': case '=':
-        e.preventDefault();
-        map.zoomBy(1.4);
-        break;
+        e.preventDefault(); map.zoomBy(1); break;
       case '-': case '_':
-        e.preventDefault();
-        map.zoomBy(1 / 1.4);
-        break;
+        e.preventDefault(); map.zoomBy(-1); break;
       case ' ':
         e.preventDefault();
         store.togglePlay();
-        announce(store.playing ? 'Operations clock running' : 'Operations clock paused');
-        break;
-      case '/':
-        e.preventDefault();
-        command.focusSearch();
+        announce(store.playing ? 'Clock running' : 'Clock paused');
         break;
       case '?':
-        e.preventDefault();
-        help.toggle();
-        break;
+        e.preventDefault(); help.toggle(); break;
       case 'Escape':
         if (help.isOpen()) help.close();
         else if (store.selection.kind) { store.clearSelection(); announce('Selection cleared'); }

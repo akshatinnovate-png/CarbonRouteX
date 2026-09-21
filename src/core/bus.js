@@ -29,6 +29,9 @@ export const EV = {
   // selection & focus
   SELECT: 'select',                      // { kind, id }
   HOVER: 'hover',
+  MAP_CLICK: 'map:click',                // { hit, lon, lat }
+  MAP_READY: 'map:ready',
+  PICK_MODE: 'map:pickmode',             // placing a depot/order by clicking
   FOCUS_MAP: 'map:focus',                // { bounds } | { x, y, zoom }
   LAYERS_CHANGED: 'layers:changed',
   // ops
@@ -38,7 +41,12 @@ export const EV = {
   SCENARIO_CHANGED: 'scenario:changed',
   WEIGHTS_CHANGED: 'weights:changed',
   TOAST: 'toast',
-  VIEW_CHANGED: 'view:changed',
+  VIEW_CHANGED: 'view:changed',          // the active tab
+  ENTITIES_CHANGED: 'entities:changed',  // depots/vehicles/orders added or edited
+  MATRIX_CHANGED: 'matrix:changed',      // the road matrix was re-fetched
+  SERVICE_STATUS: 'service:status',      // routing/geocoding reachability
+  ONBOARDED: 'onboarded',
+  SETTINGS_CHANGED: 'settings:changed',
 };
 
 export function on(type, handler) {
