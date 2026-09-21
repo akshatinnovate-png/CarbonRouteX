@@ -10,6 +10,7 @@ import { icon } from '../icons.js';
 import {
   pageWithActions, card, dataTable, empty, field, fieldRow, textInput,
   numberInput, timeInput, locationPicker, confirmButton, statTile,
+  deferWhileEditing,
 } from '../components.js';
 
 export function depotsPage(store, map) {
@@ -130,8 +131,9 @@ export function depotsPage(store, map) {
         el('button.btn.btn--primary', { type: 'button', text: existing ? 'Save changes' : 'Add depot', onclick: save })));
   }
 
-  on(EV.ENTITIES_CHANGED, (e) => { if (!e || e.kind === 'depot' || e.kind === 'import') render(); });
-  on(EV.PLAN_CHANGED, render);
+  const background = deferWhileEditing(root, render, () => formOpen);
+  on(EV.ENTITIES_CHANGED, (e) => { if (!e || e.kind === 'depot' || e.kind === 'import') background(); });
+  on(EV.PLAN_CHANGED, background);
   render();
   return root;
 }

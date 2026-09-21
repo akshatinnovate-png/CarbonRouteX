@@ -16,6 +16,7 @@
 
 import { APP, ENERGY, PERSONAL_VEHICLES, PERSONAL_OPTIONS } from '../config.js';
 import { speedFactor } from './energy.js';
+import { congestionAt } from './traffic.js';
 import { intensityAt } from './emissions.js';
 import { clamp } from '../util/math.js';
 
@@ -27,10 +28,17 @@ import { clamp } from '../util/math.js';
  */
 export function evaluateTrip(alt, { vehicleKey = 'CAR', departMinutes = 9 * 60, consumption } = {}) {
   const type = PERSONAL_VEHICLES[vehicleKey] || PERSONAL_VEHICLES.CAR;
-  // The public routing service models a car. A bicycle covers the same roads
-  // far more slowly, and a motorcycle marginally faster in traffic, so the
-  // duration is scaled rather than pretended to be measured.
-  const minutes = alt.minutes / (type.avgSpeedFactor || 1);
+  // The public routing service models a car in free-flow. A bicycle covers the
+  // same roads far more slowly, and a motorcycle marginally faster in traffic,
+  // so the duration is scaled rather than pretended to be measured.
+  const base = alt.minutes / (type.avgSpeedFactor || 1);
+
+  // Then the same time-of-day curve the fleet optimiser uses, so that "leave
+  // at noon instead" is advice both halves of the product would give.
+  // A bicycle is barely affected by congestion; a car is entirely at its mercy.
+  const exposure = type.energyType === 'human' ? 0.15 : 1;
+  const congestion = 1 + (congestionAt(departMinutes) - 1) * exposure;
+  const minutes = base * congestion;
   const km = alt.km;
   const speedKmh = minutes > 0 ? (km / (minutes / 60)) : 0;
 
@@ -52,10 +60,13 @@ export function evaluateTrip(alt, { vehicleKey = 'CAR', departMinutes = 9 * 60, 
     points: alt.points,
     estimated: !!alt.estimated,
     via: !!alt.via,
+    roads: alt.roads || [],
     km,
     minutes,
     arriveMinutes: departMinutes + minutes,
     speedKmh,
+    congestion,
+    freeFlowMinutes: base,
     units,
     unitLabel: ENERGY.unitLabel[type.energyType] || '',
     intensity,
@@ -146,6 +157,61 @@ export function buildTripOptions(alternatives, opts = {}) {
     roadsFound: trips.length,
     chosenRoads: seen.size,
     estimated: trips.some((t) => t.estimated),
+  };
+}
+
+/**
+ * What this journey costs at every departure time over the next half-day.
+ *
+ * Both levers move: traffic changes how long the drive takes and therefore how
+ * much energy it burns, and for an electric vehicle the grid's carbon
+ * intensity changes what that energy is worth. The explanation layer could
+ * already say "noon would be cleaner"; this is what makes that actionable
+ * instead of merely true.
+ *
+ * @param {object} road         one evaluated road (or a raw alternative)
+ * @param {object} opts         the same options `evaluateTrip` takes
+ * @param {number} opts.hours   how far ahead to look
+ */
+export function departureSweep(road, {
+  vehicleKey = 'CAR', fromMinutes = 9 * 60, hours = 12, stepMinutes = 60, consumption,
+} = {}) {
+  if (!road) return { slots: [], best: null, now: null };
+
+  const slots = [];
+  for (let i = 0; i <= hours; i++) {
+    const departMinutes = fromMinutes + i * stepMinutes;
+    const t = evaluateTrip(road, { vehicleKey, departMinutes, consumption });
+    slots.push({
+      departMinutes,
+      offsetHours: (departMinutes - fromMinutes) / 60,
+      minutes: t.minutes,
+      arriveMinutes: t.arriveMinutes,
+      co2: t.co2,
+      cost: t.cost,
+      congestion: t.congestion,
+      intensity: t.intensity,
+    });
+  }
+
+  const now = slots[0];
+  // "Best" means cleanest, because that is the lever this product is about.
+  // Ties break toward leaving sooner: a marginal gain is not worth a wait.
+  let best = now;
+  for (const s of slots) if (s.co2 < best.co2 - 1e-6) best = s;
+
+  const quickest = slots.reduce((a, b) => (b.minutes < a.minutes - 1e-9 ? b : a), now);
+
+  return {
+    slots,
+    now,
+    best,
+    quickest,
+    /** Worth mentioning only if waiting actually buys something. */
+    worthWaiting: best.departMinutes !== now.departMinutes
+      && (now.co2 - best.co2) / Math.max(now.co2, 1e-9) > 0.04,
+    co2Saved: now.co2 - best.co2,
+    minutesSaved: now.minutes - best.minutes,
   };
 }
 

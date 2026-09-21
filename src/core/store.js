@@ -24,7 +24,7 @@ import { Optimizer } from '../engines/optimizer.js';
 import { explainReplan, explainRoute, comparePlans } from '../engines/explain.js';
 import { buildTripOptions, explainTrip, compareTrips } from '../engines/personal.js';
 import { clamp } from '../util/math.js';
-import { clock, clockSeconds, dur, kg, num, pct } from '../util/format.js';
+import { clock, clockSeconds, dur, kg, num, pct, isoDate, stamp } from '../util/format.js';
 import { haversineKm, pointAtFraction, polylineKm } from '../render/mercator.js';
 
 let uid = 0;
@@ -139,6 +139,13 @@ export class Store {
   get settings() { return this.workspace.settings; }
   get onboarded() { return !!this.workspace.onboarded; }
   get mode() { return this.workspace.mode || null; }
+  /** Day one of the plan, as a calendar date. Defaults to today. */
+  get planStart() { return this.workspace.planStart || isoDate(new Date()); }
+  setPlanStart(iso) {
+    this.workspace.planStart = iso || null;
+    this.persist();
+    emit(EV.ENTITIES_CHANGED, { kind: 'plan-date' });
+  }
   get personal() { return this.workspace.personal; }
   get isPersonal() { return this.mode === 'PERSONAL'; }
   get isLogistics() { return this.mode === 'LOGISTICS'; }
@@ -953,10 +960,23 @@ export class Store {
   tick(realSeconds) {
     if (!this.ready) return;
     const simMinutes = (realSeconds * this.speedMultiplier) / 60;
-    if (simMinutes > 0) {
-      this.clockMinutes = Math.min(SIM.dayEndMinutes + 120, this.clockMinutes + simMinutes);
-      this.advanceVehicles(simMinutes);
+
+    // A paused clock has nothing to report. This used to emit on every single
+    // animation frame regardless, so every page subscribed to the tick
+    // re-rendered sixty times a second forever — which is how a half-typed
+    // delivery form used to empty itself while you were looking at it.
+    if (simMinutes <= 0) {
+      if (this._wasRunning) {
+        this._wasRunning = false;
+        emit(EV.FLEET_TICK, { minutes: this.clockMinutes, simMinutes: 0 });
+      }
+      return;
     }
+
+    this._wasRunning = true;
+    // The horizon is the whole plan, not one shift: a long haul runs for days.
+    this.clockMinutes = Math.min(SIM.horizonDays * 1440, this.clockMinutes + simMinutes);
+    this.advanceVehicles(simMinutes);
     emit(EV.FLEET_TICK, { minutes: this.clockMinutes, simMinutes });
   }
 

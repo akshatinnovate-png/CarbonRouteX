@@ -16,6 +16,7 @@ import { icon } from '../icons.js';
 import {
   pageWithActions, card, empty, field, fieldRow, textInput,
   numberInput, selectInput, confirmButton, statTile,
+  deferWhileEditing,
 } from '../components.js';
 import { revealStagger } from '../motion.js';
 
@@ -133,8 +134,9 @@ export function garagePage(store) {
         })));
   }
 
-  on(EV.ENTITIES_CHANGED, render);
-  on(EV.STATE_CHANGED, render);
+  const background = deferWhileEditing(root, render, () => formOpen);
+  on(EV.ENTITIES_CHANGED, background);
+  on(EV.STATE_CHANGED, background);
   render();
   return root;
 }

@@ -10,7 +10,7 @@
 import { LAYERS, VEHICLE_TYPES, PRIORITY } from '../../config.js';
 import { EV, emit, on } from '../../core/bus.js';
 import { el, mount, raf1, throttle, announce, setText } from '../../util/dom.js';
-import { clock, dur, kg as fkg, km as fkm, money, num, pct } from '../../util/format.js';
+import { clock, dur, kg as fkg, km as fkm, money, num, pct, stamp } from '../../util/format.js';
 import { vehicleColor } from '../../render/palette.js';
 import { icon } from '../icons.js';
 import { card, kv, empty, chip, statTile } from '../components.js';
@@ -306,6 +306,13 @@ export function mapPage(store, map) {
                 ...kv('Duration', dur(route.minutes)),
                 ...kv('Energy', `${num(route.units, 1)} ${energyUnitLabel(v.type)}`),
                 ...kv('CO₂e', fkg(route.co2, 2), 'var(--success)'),
+            ...(route.refuelStops
+              ? kv(VEHICLE_TYPES[route.vehicleType]?.energyType === 'bev' ? 'Charging stops' : 'Fuel stops',
+                `${route.refuelStops} · +${dur(route.refuelMinutes, { compact: true })}`, 'var(--gold-deep)')
+              : []),
+            ...(route.restStops
+              ? kv('Driver rests', `${route.restStops} · +${dur(route.restMinutes, { compact: true })}`, 'var(--gold-deep)')
+              : []),
                 ...kv('Cost', money(route.cost)),
                 ...kv('Payload', `${num(route.capacityUsedKg)} kg · ${pct(route.capacityPct, 0)}`),
                 ...kv('Back at', clock(route.endMinutes))),

@@ -11,6 +11,8 @@
  */
 
 import { PERSONAL_VEHICLES, PERSONAL_OPTIONS, APP } from '../../config.js';
+import { departureSweep } from '../../engines/personal.js';
+import { viaLabel } from '../../services/osrm.js';
 import { EV, emit, on } from '../../core/bus.js';
 import { el, mount, raf1, announce } from '../../util/dom.js';
 import { clock, dur, kg as fkg, money, num } from '../../util/format.js';
@@ -231,6 +233,10 @@ export function tripPage(store, map) {
         el('span.ro-time', { text: dur(t.minutes, { compact: true }) }),
         el('span.spacer'),
         o.sharedWith ? chip('same road', '') : null),
+      // What a person would call this route, when the router told us.
+      viaLabel(t.roads) ? el('p.ro-via', null,
+        el('span', { html: icon('route', 11) }),
+        el('span', { text: `via ${viaLabel(t.roads)}` })) : null,
       el('p.ro-blurb', { text: o.blurb }),
       el('div.ro-metrics', null,
         metric('ETA', clock(Math.round(t.arriveMinutes)), '', isBest.time),
@@ -265,10 +271,12 @@ export function tripPage(store, map) {
         },
         el('span.mini-bar', { style: { background: 'var(--teal)' } }),
         el('span.mini-text', null,
-          el('strong', { text: `${t.km.toFixed(1)} km · ${dur(t.minutes, { compact: true })}` }),
+          el('strong', { text: viaLabel(t.roads) || `${t.km.toFixed(1)} km route` }),
           el('small', {
-            text: `arrives ${clock(Math.round(t.arriveMinutes))} · ${money(t.cost, 0)} · ${fkg(t.co2, 2)} CO₂e`,
+            text: `${t.km.toFixed(1)} km · ${dur(t.minutes, { compact: true })} · `
+              + `arrives ${clock(Math.round(t.arriveMinutes))} · ${money(t.cost, 0)} · ${fkg(t.co2, 2)} CO₂e`,
           })))))) : null,
+      departureCard(trip),
       chosen ? card('Why this route',
         chip(chosen.label, 'gold'),
         el('div.explain', null,
@@ -298,6 +306,77 @@ export function tripPage(store, map) {
                 h.co2 != null ? `${h.co2.toFixed(2)} kg CO₂e` : null,
                 h.option ? optionLabel(h.option) : null].filter(Boolean).join(' · '),
             })))))) : null);
+  }
+
+  /**
+   * "When should I leave?"
+   *
+   * The explanation layer could already observe that another hour would be
+   * cleaner. This is what turns that from a remark into a control: every
+   * departure slot is costed, the quiet one is marked, and choosing it
+   * re-plans the journey at that time.
+   */
+  function departureCard(trip) {
+    const road = trip.chosen?.trip;
+    if (!road) return null;
+    const custom = store.personal.vehicles.find(
+      (v) => v.key === store.personal.vehicleKey && Number.isFinite(v.consumption),
+    );
+    const sweep = departureSweep(road, {
+      vehicleKey: store.personal.vehicleKey,
+      fromMinutes: trip.departMinutes,
+      hours: 12,
+      consumption: custom?.consumption,
+    });
+    if (!sweep.slots.length) return null;
+
+    const peak = Math.max(...sweep.slots.map((s) => s.co2));
+    const floor = Math.min(...sweep.slots.map((s) => s.co2));
+    const span = Math.max(peak - floor, 1e-9);
+
+    const bars = sweep.slots.map((slot) => {
+      const isBest = slot.departMinutes === sweep.best.departMinutes;
+      const isNow = slot.departMinutes === sweep.now.departMinutes;
+      // Height encodes CO2e against the range of the day, floored so that the
+      // cleanest hour is still a visible bar rather than nothing at all.
+      const h = 22 + 78 * ((slot.co2 - floor) / span);
+      return el('button.dep-slot', {
+        type: 'button',
+        dataset: { best: String(isBest), now: String(isNow) },
+        'aria-label': `Leave at ${clock(slot.departMinutes)}: `
+          + `${fkg(slot.co2, 2)} CO₂e, ${Math.round(slot.minutes)} minutes, `
+          + `arriving ${clock(Math.round(slot.arriveMinutes))}`,
+        title: `${clock(slot.departMinutes)} — ${fkg(slot.co2, 2)} · ${dur(slot.minutes, { compact: true })}`,
+        onclick: () => {
+          leaveNow = false;
+          store.planTrip({ departMinutes: slot.departMinutes });
+          announce(`Departure set to ${clock(slot.departMinutes)}`);
+        },
+      },
+      el('span.dep-bar', { style: { height: `${h}%` } }),
+      el('span.dep-time', { text: clock(slot.departMinutes).slice(0, 2) }));
+    });
+
+    return card('When should I leave?',
+      sweep.worthWaiting ? chip('a cleaner hour exists', 'gold') : chip('now is fine', ''),
+      el('p.field-hint', {
+        text: 'Every hour costed for this road and this vehicle. Taller means dirtier — '
+          + 'traffic burns fuel, and an electric vehicle also tracks the grid.',
+      }),
+      el('div.dep-strip', { role: 'group', 'aria-label': 'Departure times' }, ...bars),
+      sweep.worthWaiting
+        ? el('div.explain', null,
+          el('div.why-title', { text: 'Worth waiting for' }),
+          el('p', {
+            text: `Leaving at ${clock(sweep.best.departMinutes)} instead of `
+              + `${clock(sweep.now.departMinutes)} saves ${fkg(sweep.co2Saved, 2)} of CO₂e`
+              + (sweep.minutesSaved > 1
+                ? ` and ${Math.round(sweep.minutesSaved)} minutes of driving.`
+                : ' on the same road.'),
+          }))
+        : el('p.basis', {
+          text: 'Nothing meaningful to gain by waiting — this is already a good time to travel.',
+        }));
   }
 
   const metric = (label, value, unit, best) => el('div.ro-metric', { dataset: { best: String(!!best) } },

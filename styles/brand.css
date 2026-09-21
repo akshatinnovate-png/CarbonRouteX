@@ -446,3 +446,47 @@
   border: 1px solid var(--teal-soft);
 }
 .type-card .btn { margin-top: auto; }
+
+/* ------------------------------------------------- route identity & timing */
+
+.ro-via {
+  margin: 0; display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .02em;
+  color: var(--teal-deep);
+}
+.ro-via > span:first-child { display: flex; flex: none; opacity: .8; }
+.route-option[data-selected="true"] .ro-via { color: var(--gold-deep); }
+
+/* --- "when should I leave?" ------------------------------------------- */
+
+.dep-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+  height: 92px;
+  align-items: end;
+  padding: var(--sp-2) 0 0;
+}
+.dep-slot {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  gap: 4px; height: 100%; min-width: 0;
+  border-radius: var(--r-xs);
+  transition: background var(--dur-1);
+}
+.dep-slot:hover { background: var(--teal-wash); }
+.dep-bar {
+  display: block; width: 100%;
+  background: var(--teal-soft);
+  border-radius: 3px 3px 0 0;
+  transition: background var(--dur-2), height var(--dur-3) var(--ease-out);
+}
+.dep-slot:hover .dep-bar { background: var(--teal); }
+/* The hour you would actually leave, and the one worth waiting for. */
+.dep-slot[data-now="true"] .dep-bar { background: var(--teal); }
+.dep-slot[data-best="true"] .dep-bar { background: var(--gold); }
+.dep-slot[data-best="true"] .dep-time { color: var(--gold-deep); font-weight: 700; }
+.dep-time {
+  font-family: var(--font-mono); font-size: 9px; color: var(--faint);
+  letter-spacing: -.02em;
+}

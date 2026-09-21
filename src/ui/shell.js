@@ -14,7 +14,7 @@
 import { APP } from '../config.js';
 import { EV, emit, on } from '../core/bus.js';
 import { el, mount, setText, announce, raf1 } from '../util/dom.js';
-import { clock, num, pct } from '../util/format.js';
+import { clock, num, pct, stamp } from '../util/format.js';
 import { icon } from './icons.js';
 
 import { mapPage } from './pages/map.js';
@@ -239,7 +239,7 @@ export function initTopbar(store, shell) {
 
   const renderClock = raf1(() => {
     if (store.isPersonal) return;
-    setText(clockEl.querySelector('.t'), clock(store.clockMinutes));
+    setText(clockEl.querySelector('.t'), stamp(store.clockMinutes));
     setText(clockEl.querySelector('.d'), store.playing ? 'PLAN CLOCK' : 'PAUSED');
     for (const b of speedHost.querySelectorAll('button')) {
       b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === store.speedMultiplier));

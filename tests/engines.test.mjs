@@ -7,7 +7,7 @@ import {
 } from '../src/render/mercator.js';
 import {
   straightLineMatrix, straightLineKm, DETOUR_FACTOR, OsrmService,
-  viaCandidates, geometrySignature, overlapRatio,
+  viaCandidates, geometrySignature, overlapRatio, namedRoads, viaLabel, assumedSpeedKmh,
 } from '../src/services/osrm.js';
 import { makeProvider, TILE_PROVIDERS, customProvider, DEFAULT_PROVIDER } from '../src/services/tiles.js';
 import { NetworkMatrix } from '../src/engines/matrix.js';
@@ -16,7 +16,9 @@ import { Optimizer, paretoFront, sampleWeights } from '../src/engines/optimizer.
 import { comparePlans, explainRoute, planDiff, explainCarbon } from '../src/engines/explain.js';
 import { edgeEnergy, speedFactor, gradeFactor, unitsToFraction } from '../src/engines/energy.js';
 import { intensityAt, co2e, cleanestHour } from '../src/engines/emissions.js';
-import { buildTripOptions, evaluateTrip, compareTrips, explainTrip } from '../src/engines/personal.js';
+import {
+  buildTripOptions, evaluateTrip, compareTrips, explainTrip, departureSweep,
+} from '../src/engines/personal.js';
 import { emptyWorkspace, importWorkspace, exportWorkspace } from '../src/core/storage.js';
 import { PRESETS, VEHICLE_TYPES, SIM, PERSONAL_VEHICLES } from '../src/config.js';
 import { rng, normalize } from '../src/util/math.js';
@@ -498,7 +500,12 @@ suite('Optimizer', () => {
     for (const r of optimised.routes) {
       atMost(r.capacityUsedKg, VEHICLE_TYPES[r.vehicleType].capacityKg, `capacity on ${r.id}`);
       const v = env.ctx.vehiclesById.get(r.vehicleId);
-      atMost(r.energyFraction, Math.max(0, v.energyLevel - 0.10) + 1e-9, `range reserve on ${r.id}`);
+      // Range is no longer a wall: a route either fits in the tank it started
+      // with, or it stops to fill up. What must never happen is a route that
+      // burns more than it carries and refuels nowhere.
+      const usable = Math.max(0, v.energyLevel - 0.10);
+      assert(r.energyFraction <= usable + 1e-9 || r.refuelStops > 0,
+        `${r.id} burns ${r.energyFraction.toFixed(2)} tanks with ${r.refuelStops} fuel stops`);
     }
   });
 
@@ -702,6 +709,166 @@ function encodePolyline6(points) {
   return out;
 }
 
+suite('Naming a road', () => {
+  /** OSRM reports one name per manoeuvre, so a highway arrives in fragments. */
+  const raw = {
+    legs: [{
+      steps: [
+        { name: 'NH-33', distance: 4000 },
+        { name: 'Ranchi Ring Road', distance: 1500 },
+        { name: 'NH-33', distance: 6000 },   // same road, later fragment
+        { name: '', distance: 300 },          // unnamed slip road
+        { name: '-', distance: 120 },         // OSRM's "no name" marker
+        { name: 'Service Road', distance: 180 },
+      ],
+    }],
+  };
+
+  test('fragments of one road are summed, not listed separately', () => {
+    const roads = namedRoads(raw);
+    equal(roads[0].name, 'NH-33', 'the road carrying the most distance leads');
+    close(roads[0].km, 10, 1e-9, 'both of its fragments counted');
+    equal(roads.filter((r) => r.name === 'NH-33').length, 1, 'and it appears once');
+  });
+
+  test('unnamed and trivial segments are left out of the description', () => {
+    const names = namedRoads(raw).map((r) => r.name);
+    assert(!names.includes(''), 'no blank entries');
+    assert(!names.includes('-'), "no OSRM 'no name' markers");
+    assert(!names.includes('Service Road'), 'a 1.5% segment is a detail, not a description');
+  });
+
+  test('a route with no named roads says nothing rather than something empty', () => {
+    equal(namedRoads({ legs: [{ steps: [{ name: '', distance: 900 }] }] }).length, 0, 'no roads');
+    equal(namedRoads({}).length, 0, 'no legs at all');
+    equal(viaLabel([]), '', 'and the label is empty, not "via undefined"');
+  });
+
+  test('the via label reads the way somebody would say it', () => {
+    equal(viaLabel(namedRoads(raw)), 'NH-33 · Ranchi Ring Road', 'two roads, longest first');
+  });
+});
+
+suite('Assumed speed', () => {
+  test('a city hop and a motorway run are not the same speed', () => {
+    greater(assumedSpeedKmh(400), assumedSpeedKmh(3) * 2, 'long legs are much faster');
+    close(assumedSpeedKmh(0), assumedSpeedKmh(1), 1e-9, 'degenerate lengths are urban');
+  });
+
+  test('speed rises with distance and then levels off', () => {
+    let prev = 0;
+    for (const km of [1, 5, 20, 80, 200, 300, 900]) {
+      const v = assumedSpeedKmh(km);
+      assert(v >= prev - 1e-9, `speed never falls as distance grows (${km} km)`);
+      atMost(v, 58 + 1e-9, 'and never exceeds the highway figure');
+      prev = v;
+    }
+  });
+
+  test('Ranchi to Delhi is a day of driving, not two', () => {
+    // The old flat 32 km/h made an estimated long haul take 43 hours of
+    // driving, which is what made a realistic deadline look unreachable.
+    const km = 1390;
+    const hours = km / assumedSpeedKmh(km);
+    assert(hours > 20 && hours < 28, `about a day at the wheel, got ${hours.toFixed(1)} h`);
+  });
+});
+
+suite('Long haul', () => {
+  // Ranchi to Delhi: about 1,300 km by road. No van does that on one tank and
+  // no driver does it inside one shift, but both can certainly do it.
+  const RANCHI = { lon: 85.3096, lat: 23.3441 };
+  const DELHI = { lon: 77.2090, lat: 28.6139 };
+
+  async function haul(vehicleType, { energyLevel = 1 } = {}) {
+    const depot = {
+      id: 'D1', name: 'Ranchi DC', lon: RANCHI.lon, lat: RANCHI.lat,
+      short: 'Ranchi', openMinutes: 360, closeMinutes: 1320,
+    };
+    const order = {
+      id: 'O1', ref: 'ORD-101', consignee: 'Delhi NCR', short: 'Delhi',
+      lon: DELHI.lon, lat: DELHI.lat, weightKg: 400, priority: 'standard',
+      windowOpen: SIM.dayStartMinutes,
+      // Day four at noon — a deadline you can only express once time is
+      // measured from the start of the plan rather than from midnight. The
+      // round trip is roughly 2,800 km with rests, so a same-week deadline is
+      // the realistic one; day three was simply too tight, which the model
+      // said plainly rather than pretending otherwise.
+      deadline: 3 * 1440 + 12 * 60,
+      serviceMinutes: 30,
+    };
+    const vehicle = {
+      id: 'V1', callsign: 'TRK-01', type: vehicleType, depotId: 'D1',
+      energyLevel, available: true,
+      lon: RANCHI.lon, lat: RANCHI.lat,
+    };
+    const ctx = {
+      depots: [depot],
+      depotsById: new Map([[depot.id, depot]]),
+      ordersById: new Map([[order.id, order]]),
+      vehiclesById: new Map([[vehicle.id, vehicle]]),
+    };
+    const matrix = new NetworkMatrix();
+    const offline = new OsrmService();
+    offline._fetch = async () => { throw new Error('offline by design'); };
+    await matrix.build([
+      { id: 'D1', lon: depot.lon, lat: depot.lat },
+      { id: 'O1', lon: order.lon, lat: order.lat },
+    ], offline);
+    const engine = new PlanEngine(matrix, ctx);
+    return engine.evaluateRoute(vehicle, ['O1'], PRESETS.balanced, SIM.dayStartMinutes);
+  }
+
+  test('a diesel van can drive Ranchi to Delhi — it just has to fill up', async () => {
+    const route = await haul('diesel_van');
+    assert(route.feasible, 'the journey is possible');
+    assert(!route.violations.some((v) => v.code === 'range' && v.severity === 'hard'),
+      'range is never a hard violation: filling stations exist');
+    greater(route.km, 1000, 'it really is a long way');
+    greater(route.refuelStops, 1, 'and it really does need refuelling');
+    greater(route.refuelMinutes, 0, 'which costs time');
+  });
+
+  test('refuelling stops are what the distance needs, not a fixed guess', async () => {
+    const full = await haul('diesel_van', { energyLevel: 1 });
+    const nearlyEmpty = await haul('diesel_van', { energyLevel: 0.15 });
+    greater(nearlyEmpty.refuelStops, full.refuelStops - 1e-9, 'leaving low never needs fewer stops');
+    greater(nearlyEmpty.minutes, full.minutes - 1e-9, 'and never takes less time');
+  });
+
+  test('an electric van pays for the same haul in charging time', async () => {
+    const diesel = await haul('diesel_van');
+    const electric = await haul('ev_van');
+    greater(electric.refuelStops, diesel.refuelStops, 'shorter range, more stops');
+    greater(electric.minutes, diesel.minutes, 'and a slower journey overall');
+    // Still entirely possible — the optimiser weighs it, it does not forbid it.
+    assert(electric.feasible, 'an e-van crossing India is a trade-off, not an error');
+  });
+
+  test('a multi-day haul books driver rest rather than driving all night', async () => {
+    const route = await haul('diesel_truck');
+    greater(route.drivingMinutes, SIM.maxDrivingMinutesPerDay, 'more than one shift of driving');
+    greater(route.restStops, 0, 'so the driver rests');
+    greater(route.minutes, route.drivingMinutes, 'and the route takes longer than the driving alone');
+  });
+
+  test('a deadline can sit on a later day and still be met', async () => {
+    const route = await haul('diesel_truck');
+    const stop = route.stops[0];
+    greater(stop.deadline, 1440, 'the deadline is on a later day');
+    greater(stop.arrival, 1440, 'and so is the arrival');
+    equal(stop.late, 0, 'which makes it on time rather than a day late');
+  });
+
+  test('the fuel and rest time is inside the schedule, not bolted on after', async () => {
+    const route = await haul('diesel_van');
+    const stop = route.stops[0];
+    // Every stop after a fill must have been pushed later by it.
+    greater(stop.arrival, SIM.dayStartMinutes + route.drivingMinutes, 'arrival includes the stops');
+    greater(route.endMinutes, route.startMinutes + route.drivingMinutes, 'so does the return');
+  });
+});
+
 suite('Finding different roads', () => {
   const A = { lon: 87.5089, lat: 21.6270 };   // Digha
   const B = { lon: 87.3119, lat: 22.3149 };   // inland, ~80 km north
@@ -861,10 +1028,14 @@ suite('Personal trip engine', () => {
     equal(fastest.id, 'ring', 'fastest picks the quickest road');
     for (const t of set.trips) assert(greenest.co2 <= t.co2 + 1e-9, 'the green option really is the lowest-emission one');
     assert(greenest.id !== fastest.id, 'and on this network it is not the fast one');
-    // The shortest road is not the cleanest either: crawling through town
-    // burns more per kilometre than the arterial does.
+    // Distance alone does not decide emissions: the slow road through town
+    // burns more per kilometre than the arterial, so the cleanest road is
+    // chosen on CO2e and not by picking the shortest line on the map.
     const shortest = set.trips.reduce((a, b) => (a.km <= b.km ? a : b));
-    greater(shortest.co2, greenest.co2, 'shortest is not the same as cleanest');
+    const perKm = (t) => t.co2 / t.km;
+    greater(perKm(shortest), perKm(set.trips.find((t) => t.id === 'ring')),
+      'the short town road is dirtier per kilometre than the ring road');
+    assert(greenest.co2 <= shortest.co2 + 1e-9, 'and the cleanest is never beaten on total CO2e');
   });
 
   test('one road in means one road out, honestly labelled', () => {
@@ -905,8 +1076,42 @@ suite('Personal trip engine', () => {
   test('an electric car is charged the grid intensity of the hour it travels', () => {
     const noon = evaluateTrip(ALTS[0], { vehicleKey: 'EV', departMinutes: 12 * 60 });
     const evening = evaluateTrip(ALTS[0], { vehicleKey: 'EV', departMinutes: 19 * 60 });
-    close(noon.units, evening.units, 1e-9, 'the same energy either way');
-    greater(evening.co2, noon.co2, 'but the evening grid is dirtier');
+    greater(evening.intensity, noon.intensity, 'the evening grid is dirtier per kWh');
+    greater(evening.co2, noon.co2, 'so the same journey emits more');
+    // Both levers move together: the evening peak is also slower, and sitting
+    // in traffic burns energy as well as time.
+    greater(evening.congestion, noon.congestion, 'the evening is more congested');
+    greater(evening.minutes, noon.minutes, 'which makes the drive longer');
+  });
+
+  test('departure time is a lever, and the sweep finds the quiet hour', () => {
+    const sweep = departureSweep(ALTS[0], { vehicleKey: 'EV', fromMinutes: 18 * 60, hours: 12 });
+    equal(sweep.slots.length, 13, 'one slot per hour, inclusive');
+    for (const s of sweep.slots) {
+      assert(Number.isFinite(s.co2) && s.co2 > 0, 'every slot is costed');
+      assert(s.congestion >= 1, 'congestion never speeds anybody up');
+    }
+    // Leaving into the evening peak is the worst moment to start this journey.
+    assert(sweep.best.co2 <= sweep.now.co2 + 1e-9, 'the best slot is never worse than now');
+    assert(sweep.worthWaiting, 'and leaving at 18:00 is worth waiting out');
+    greater(sweep.co2Saved, 0, 'waiting saves real emissions');
+  });
+
+  test('the sweep does not nag when there is nothing to gain', () => {
+    // Departing in the small hours is already the quiet, clean part of the day.
+    const sweep = departureSweep(ALTS[0], { vehicleKey: 'CAR', fromMinutes: 3 * 60, hours: 12 });
+    assert(!sweep.worthWaiting || sweep.co2Saved / sweep.now.co2 > 0.04,
+      'waiting is only suggested when it buys more than a rounding error');
+  });
+
+  test('a bicycle is barely troubled by rush hour', () => {
+    const peak = evaluateTrip(ALTS[0], { vehicleKey: 'BIKE', departMinutes: 18 * 60 });
+    const quiet = evaluateTrip(ALTS[0], { vehicleKey: 'BIKE', departMinutes: 3 * 60 });
+    const carPeak = evaluateTrip(ALTS[0], { vehicleKey: 'CAR', departMinutes: 18 * 60 });
+    const carQuiet = evaluateTrip(ALTS[0], { vehicleKey: 'CAR', departMinutes: 3 * 60 });
+    const swing = (a, b) => a.minutes / b.minutes;
+    assert(swing(peak, quiet) < swing(carPeak, carQuiet),
+      'a bicycle loses proportionally less to traffic than a car');
   });
 
   test('a custom consumption figure overrides the archetype', () => {

@@ -195,7 +195,7 @@ export class OsrmService {
         const result = {
           points: points.slice(),
           km,
-          minutes: (km / 32) * 60,
+          minutes: (km / assumedSpeedKmh(km)) * 60,
           legs: [],
           estimated: true,
         };
@@ -254,12 +254,16 @@ export class OsrmService {
           minutes: raw.duration / 60,
           estimated: false,
           via: !!via,
+          roads: namedRoads(raw),
         });
         return true;
       };
 
+      // `steps=true` costs a bigger response but buys the road names, which is
+      // the difference between six anonymous rows of numbers and six routes
+      // somebody recognises. The fleet's geometry request stays lean.
       const routeUrl = (coords, extra = '') => `${this.endpoint}/route/v1/${this.profile}/${coords}`
-        + `?overview=full&geometries=polyline6&steps=false${extra}`;
+        + `?overview=full&geometries=polyline6&steps=true${extra}`;
 
       try {
         this.stats.routeRequests++;
@@ -271,7 +275,7 @@ export class OsrmService {
         const km = straightLineKm(points);
         return [{
           id: 'alt-0', points: points.slice(), km,
-          minutes: (km / ASSUMED_SPEED_KMH) * 60, estimated: true, via: false,
+          minutes: (km / assumedSpeedKmh(km)) * 60, estimated: true, via: false,
         }];
       } finally {
         this.inFlight.delete(cacheKey);
@@ -281,7 +285,7 @@ export class OsrmService {
         const km = straightLineKm(points);
         return [{
           id: 'alt-0', points: points.slice(), km,
-          minutes: (km / ASSUMED_SPEED_KMH) * 60, estimated: true, via: false,
+          minutes: (km / assumedSpeedKmh(km)) * 60, estimated: true, via: false,
         }];
       }
 
@@ -324,6 +328,7 @@ export class OsrmService {
           minutes: r.minutes,
           estimated: false,
           via: r.via,
+          roads: r.roads,
         }));
 
       if (this.routeCache.size > 600) {
@@ -363,7 +368,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * data is told it is an estimate.
  */
 export const DETOUR_FACTOR = 1.32;
-const ASSUMED_SPEED_KMH = 32;
+
+/**
+ * Assumed average speed for a leg of a given length, in km/h.
+ *
+ * A single constant cannot describe both a two-kilometre crawl across a city
+ * and a thousand-kilometre motorway run. Using the urban figure for both was
+ * why an estimated long haul used to take a preposterous number of days: at
+ * 32 km/h, Ranchi to Delhi is forty-three hours of driving. Short legs are
+ * mostly junctions and traffic lights; long ones are mostly highway.
+ */
+export function assumedSpeedKmh(km) {
+  if (!(km > 0)) return URBAN_SPEED_KMH;
+  if (km <= 5) return URBAN_SPEED_KMH;
+  if (km >= 300) return HIGHWAY_SPEED_KMH;
+  const t = (km - 5) / 295;
+  return URBAN_SPEED_KMH + (HIGHWAY_SPEED_KMH - URBAN_SPEED_KMH) * Math.sqrt(t);
+}
+
+const URBAN_SPEED_KMH = 24;
+const HIGHWAY_SPEED_KMH = 58;
+/** Kept for the single-figure cases that genuinely are urban. */
+const ASSUMED_SPEED_KMH = URBAN_SPEED_KMH;
 
 export function straightLineKm(points) {
   let total = 0;
@@ -382,7 +408,7 @@ export function straightLineMatrix(points) {
       if (i === j) continue;
       const km = haversineKm(points[i].lon, points[i].lat, points[j].lon, points[j].lat) * DETOUR_FACTOR;
       distances[i][j] = km * 1000;
-      durations[i][j] = (km / ASSUMED_SPEED_KMH) * 3600;
+      durations[i][j] = (km / assumedSpeedKmh(km)) * 3600;
     }
   }
   return { durations, distances };
@@ -391,6 +417,39 @@ export function straightLineMatrix(points) {
 /* ------------------------------------------------------------------ */
 /* Finding different roads                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The roads a route actually spends its distance on, longest first.
+ *
+ * OSRM reports a name per manoeuvre, so a single highway arrives as dozens of
+ * fragments. Summing distance per name and ranking by that gives the two or
+ * three roads a person would use to describe the route — "via NH-33" rather
+ * than a list of every slip road it touches. Unnamed segments (service roads,
+ * roundabouts) are skipped rather than shown as blanks.
+ */
+export function namedRoads(raw, limit = 3) {
+  const byName = new Map();
+  for (const leg of raw.legs || []) {
+    for (const step of leg.steps || []) {
+      const name = (step.name || '').trim();
+      if (!name || name === '-') continue;
+      byName.set(name, (byName.get(name) || 0) + (step.distance || 0));
+    }
+  }
+  const total = [...byName.values()].reduce((a, b) => a + b, 0);
+  if (!total) return [];
+  return [...byName.entries()]
+    .sort((a, b) => b[1] - a[1])
+    // A road carrying under 8% of the distance is a detail, not a description.
+    .filter(([, m]) => m / total >= 0.08)
+    .slice(0, limit)
+    .map(([name, m]) => ({ name, km: m / 1000, share: m / total }));
+}
+
+/** "via NH-33 · Ranchi Ring Road" — how a person names a route. */
+export const viaLabel = (roads, limit = 2) => (roads?.length
+  ? roads.slice(0, limit).map((r) => r.name).join(' · ')
+  : '');
 
 /**
  * Via points offset sideways from the straight line between two places.

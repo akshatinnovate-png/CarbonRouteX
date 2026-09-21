@@ -15,6 +15,7 @@ import { icon } from '../icons.js';
 import {
   pageWithActions, card, dataTable, empty, field, fieldRow, textInput,
   numberInput, selectInput, confirmButton, statTile, chip,
+  deferWhileEditing,
 } from '../components.js';
 
 export function fleetPage(store, map) {
@@ -194,10 +195,12 @@ export function fleetPage(store, map) {
     })[v.status] || '';
   };
 
-  on(EV.ENTITIES_CHANGED, render);
-  on(EV.PLAN_CHANGED, render);
-  on(EV.SELECT, render);
-  on(EV.FLEET_TICK, throttle(render, 1500));
+  // Live telemetry must not cost the operator the vehicle they are entering.
+  const background = deferWhileEditing(root, render, () => formOpen);
+  on(EV.ENTITIES_CHANGED, background);
+  on(EV.PLAN_CHANGED, background);
+  on(EV.SELECT, background);
+  on(EV.FLEET_TICK, throttle(background, 1500));
   render();
   return root;
 }

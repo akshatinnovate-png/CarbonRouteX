@@ -18,6 +18,7 @@
 
 import { TRAFFIC, VEHICLE_TYPES } from '../config.js';
 import { clamp } from '../util/math.js';
+import { demandAt, congestionFrom } from './traffic.js';
 import { edgeEnergy } from './energy.js';
 import { intensityAt } from './emissions.js';
 import { ENERGY } from '../config.js';
@@ -77,12 +78,8 @@ export class NetworkMatrix {
   /* ---------------------------------------------------------------- */
 
   /** Smoothly-interpolated diurnal demand, 0..1. */
-  demandAt(minutes) {
-    const h = ((minutes / 60) % 24 + 24) % 24;
-    const i = Math.floor(h), f = h - i;
-    const a = TRAFFIC.diurnal[i % 24], b = TRAFFIC.diurnal[(i + 1) % 24];
-    return a + (b - a) * f;
-  }
+  /** Delegates to the shared model so PERSONAL and LOGISTICS agree on 18:00. */
+  demandAt(minutes) { return demandAt(minutes); }
 
   /**
    * Travel-time multiplier for a leg at a given clock time.
@@ -96,7 +93,7 @@ export class NetworkMatrix {
       const near = this._nearIncident(i, inc) || this._nearIncident(j, inc);
       if (near > 0) c = clamp(c + inc.severity * near, 0, 3.2);
     }
-    return 1 + 0.62 * Math.pow(c, 1.9);
+    return congestionFrom(c);
   }
 
   _nearIncident(index, inc) {

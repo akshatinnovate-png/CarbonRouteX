@@ -7,8 +7,8 @@
  */
 
 import { EV, emit } from '../core/bus.js';
-import { el, mount, debounce, announce } from '../util/dom.js';
-import { clock, num } from '../util/format.js';
+import { el, mount, debounce, announce, isTypingTarget, setText } from '../util/dom.js';
+import { clock, num, isoDate } from '../util/format.js';
 import { icon } from './icons.js';
 
 /* ------------------------------------------------------------------ */
@@ -101,7 +101,85 @@ export function timeInput({ minutes = 8 * 60, ...rest } = {}) {
   return input;
 }
 
+/**
+ * A date and a time, stored as minutes from the start of the plan.
+ *
+ * A bare time control cannot express "Thursday afternoon", which is exactly
+ * what a long-haul deadline is: Ranchi to Delhi is not a today problem. The
+ * date half maps onto day offsets from the plan's first day, so the engine
+ * keeps working in plain minutes and only the operator deals in dates.
+ *
+ * Returns a node with `.getMinutes()`.
+ */
+export function dateTimeInput({ minutes = 8 * 60, planStart, max = 30, ...rest } = {}) {
+  const start = planStart ? new Date(`${planStart}T00:00:00`) : new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const dayOffset = Math.max(0, Math.floor(minutes / 1440));
+  const atDay = new Date(start);
+  atDay.setDate(atDay.getDate() + dayOffset);
+
+  const date = el('input.input.input--date', {
+    type: 'date',
+    value: isoDate(atDay),
+    min: isoDate(start),
+    ...rest,
+  });
+  const time = el('input.input.input--time', {
+    type: 'time',
+    value: `${String(Math.floor((minutes % 1440) / 60)).padStart(2, '0')}:${String(Math.round(minutes % 60)).padStart(2, '0')}`,
+  });
+
+  const dayNote = el('span.field-hint.day-note');
+  const refresh = () => {
+    const d = dayIndex();
+    setText(dayNote, d === 0 ? 'Day 1 — the first day of the plan' : `Day ${d + 1} of the plan`);
+  };
+
+  function dayIndex() {
+    if (!date.value) return 0;
+    const picked = new Date(`${date.value}T00:00:00`);
+    const diff = Math.round((picked - start) / 86400000);
+    return Math.max(0, Math.min(max, diff));
+  }
+
+  date.addEventListener('change', refresh);
+  refresh();
+
+  const node = el('div.datetime', null, el('div.row', null, date, time), dayNote);
+  node.getMinutes = () => {
+    const [h, m] = (time.value || '00:00').split(':').map(Number);
+    return dayIndex() * 1440 + (h || 0) * 60 + (m || 0);
+  };
+  return node;
+}
+
 export const fieldRow = (...fields) => el('div.field-row', null, ...fields);
+
+/**
+ * Wrap a page re-render so that background events never interrupt data entry.
+ *
+ * Pages rebuild themselves wholesale, which is simple and fast and completely
+ * unacceptable while somebody is halfway through typing an address into one of
+ * them. A table that is two seconds stale is a non-event; a form that empties
+ * itself mid-sentence ends the task.
+ *
+ * Use this for anything driven by the clock, the optimiser or another page.
+ * Direct responses to the operator's own action should call `render` itself —
+ * they are the reason the view needs to change.
+ *
+ * @param {HTMLElement} root   the page root, to scope the focus test
+ * @param {Function} render    the page's normal render
+ * @param {Function} [isBusy]  extra "do not disturb" test, e.g. () => formOpen
+ */
+export function deferWhileEditing(root, render, isBusy = () => false) {
+  return (...args) => {
+    if (isBusy()) return;
+    const active = document.activeElement;
+    if (active && root.contains(active) && isTypingTarget(active)) return;
+    return render(...args);
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Location picker                                                     */

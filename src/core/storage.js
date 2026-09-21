@@ -38,6 +38,12 @@ export function emptyWorkspace() {
      */
     mode: null,
     region: null,            // { label, lon, lat } — the operating city
+    /**
+     * The calendar date day one of the plan falls on. Every time in the model
+     * is minutes from 00:00 on this date, which is what lets a deadline sit
+     * three days out instead of wrapping at midnight.
+     */
+    planStart: null,         // 'YYYY-MM-DD', null = today
     depots: [],
     vehicles: [],
     orders: [],

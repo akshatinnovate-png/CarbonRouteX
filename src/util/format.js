@@ -27,6 +27,45 @@ export function dur(mins, opts = {}) {
   return `${sign}${h}h ${String(r).padStart(2, '0')}m`;
 }
 
+/**
+ * Which day of the plan a timestamp falls on. Day 1 is the operating day the
+ * plan starts on, so `dayOf(0)` is 1, not 0 — operators count from one.
+ */
+export const dayOf = (minutes) => Math.floor((minutes ?? 0) / 1440) + 1;
+
+/**
+ * A plan timestamp, shown with its day only when there is a day to show.
+ *
+ * Times in this model are minutes from the start of the planning horizon, not
+ * minutes past midnight, because long haul does not fit in a day. Printing
+ * "14:00" for something two days out would be a lie of omission.
+ */
+export function stamp(minutes, { long = false } = {}) {
+  if (!Number.isFinite(minutes)) return '--:--';
+  const day = dayOf(minutes);
+  const hhmm = clock(minutes);
+  if (day <= 1) return hhmm;
+  return long ? `Day ${day}, ${hhmm}` : `D${day} ${hhmm}`;
+}
+
+/** The real calendar date a plan minute falls on, given the plan's start. */
+export function planDate(minutes, startISO) {
+  const base = startISO ? new Date(`${startISO}T00:00:00`) : new Date();
+  base.setHours(0, 0, 0, 0);
+  base.setDate(base.getDate() + Math.floor((minutes ?? 0) / 1440));
+  return base;
+}
+
+export const isoDate = (d) => {
+  const t = new Date(d);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+};
+
+/** "Tue 23 Sep" — a date somebody can act on without counting days. */
+export const dateLabel = (d) => new Intl.DateTimeFormat('en-IN', {
+  weekday: 'short', day: 'numeric', month: 'short',
+}).format(new Date(d));
+
 /** Minutes-since-midnight → "14:42". */
 export function clock(minutes) {
   if (!Number.isFinite(minutes)) return '--:--';

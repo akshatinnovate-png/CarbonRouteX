@@ -16,7 +16,7 @@
  *
  * Constraints checked:
  *   - payload vs. vehicle capacity          (hard)
- *   - energy required vs. usable range      (hard, with a reserve)
+ *   - energy required vs. usable range      (a refuelling stop, not a wall)
  *   - delivery deadline                     (soft, penalised per minute late)
  *   - depot operating window                (soft)
  *   - vehicle availability                  (hard)
@@ -27,6 +27,8 @@ import { clamp } from '../util/math.js';
 import { unitsToFraction, stopEnergy } from './energy.js';
 
 const ENERGY_RESERVE = 0.10; // never plan to arrive below 10% charge/fuel
+/** A long rest after a day's driving. Not a legal model, but not nothing. */
+const REST_MINUTES = 9 * 60;
 
 export class PlanEngine {
   /**
@@ -86,6 +88,8 @@ export class PlanEngine {
       startMinutes, endMinutes: startMinutes,
       capacityUsedKg: 0, capacityPct: 0,
       energyFraction: 0, reliability: 1,
+      refuelStops: 0, refuelMinutes: 0, refuelEvents: [],
+      restStops: 0, restMinutes: 0,
       lateMinutes: 0, lateOrders: 0,
       feasible: true, violations: [],
       worstCongestion: 1,
@@ -124,6 +128,39 @@ export class PlanEngine {
     let remainingKg = totalWeight;
     let fromIdx = depotIdx;
 
+    /*
+     * Fuel and rest.
+     *
+     * Range used to be a hard constraint on the whole route, which made a van
+     * "unable" to drive Ranchi to Delhi. Filling stations exist. What a long
+     * haul actually costs is time: a stop to fill or charge, and a driver who
+     * cannot legally drive all night. So both are modelled as events that
+     * happen during the route and push every downstream ETA, rather than as
+     * reasons to declare the journey impossible.
+     */
+    const fullUnits = (type.consumption / 100) * Math.max(type.rangeKm, 1);
+    const usableUnits = fullUnits * (1 - ENERGY_RESERVE);
+    // How far into the tank the vehicle already is when it leaves the depot.
+    let unitsSinceFill = fullUnits * (1 - clamp(vehicle.energyLevel ?? 1, 0, 1));
+    let drivingSinceRest = 0;
+
+    const refuelAt = (km) => {
+      unitsSinceFill -= usableUnits;
+      route.refuelStops++;
+      route.refuelMinutes += type.refuelMinutes ?? 20;
+      route.cost += ((type.refuelMinutes ?? 20) / 60) * type.driverCostPerHr;
+      route.refuelEvents.push({ kind: 'refuel', atKm: km, minutes: type.refuelMinutes ?? 20, clock });
+      clock += type.refuelMinutes ?? 20;
+    };
+
+    const restAt = (km) => {
+      drivingSinceRest -= SIM.maxDrivingMinutesPerDay;
+      route.restStops++;
+      route.restMinutes += REST_MINUTES;
+      route.refuelEvents.push({ kind: 'rest', atKm: km, minutes: REST_MINUTES, clock });
+      clock += REST_MINUTES;
+    };
+
     const sequence = [...orders.map((o) => ({ kind: 'order', order: o })), { kind: 'depot' }];
     for (const step of sequence) {
       const payload = clamp(remainingKg / type.capacityKg, 0, 1.2);
@@ -150,6 +187,14 @@ export class PlanEngine {
       route.worstCongestion = Math.max(route.worstCongestion, leg.congestion);
       clock += leg.minutes;
       fromIdx = toIdx;
+
+      // A single leg can be longer than a full tank — a 1,300 km motorway run
+      // is one "leg" here — so this fills as many times as the distance needs.
+      unitsSinceFill += leg.units;
+      while (unitsSinceFill > usableUnits && usableUnits > 0) refuelAt(route.km);
+
+      drivingSinceRest += leg.minutes;
+      while (drivingSinceRest > SIM.maxDrivingMinutesPerDay) restAt(route.km);
 
       if (step.kind === 'order') {
         const o = step.order;
@@ -183,17 +228,31 @@ export class PlanEngine {
     route.minutes = route.endMinutes - route.startMinutes;
     route.energyFraction = unitsToFraction(type, route.units);
 
-    const usable = Math.max(0, vehicle.energyLevel - ENERGY_RESERVE);
-    if (route.energyFraction > usable) {
-      route.feasible = false;
+    route.serviceMinutes += route.refuelMinutes + route.restMinutes;
+
+    // Needing to refuel is not a failure, it is a fact about the distance, and
+    // the optimiser already feels its cost in minutes and driver wages. It is
+    // reported so the operator can see it, and weighed, never forbidden.
+    if (route.refuelStops > 0) {
+      const label = type.energyType === 'bev' ? 'charging stop' : 'fuel stop';
       route.violations.push({
-        code: 'range', severity: 'hard',
-        label: `Needs ${Math.round(route.energyFraction * 100)}% of range; ${Math.round(usable * 100)}% usable remains`,
+        code: 'refuel', severity: 'info',
+        label: `${route.refuelStops} ${label}${route.refuelStops > 1 ? 's' : ''} `
+          + `(+${Math.round(route.refuelMinutes)} min)`,
       });
-    } else if (route.energyFraction > usable * 0.86) {
+    }
+    if (route.restStops > 0) {
+      route.violations.push({
+        code: 'rest', severity: 'info',
+        label: `${route.restStops} driver rest${route.restStops > 1 ? 's' : ''} `
+          + `(+${Math.round(route.restMinutes / 60)} h)`,
+      });
+    }
+    const usable = Math.max(0, (vehicle.energyLevel ?? 1) - ENERGY_RESERVE);
+    if (route.refuelStops === 0 && route.energyFraction > usable * 0.86) {
       route.violations.push({
         code: 'range_margin', severity: 'soft',
-        label: `Thin energy margin — arrives near ${Math.round((vehicle.energyLevel - route.energyFraction) * 100)}%`,
+        label: `Thin energy margin — arrives near ${Math.round(((vehicle.energyLevel ?? 1) - route.energyFraction) * 100)}%`,
       });
     }
 
@@ -203,7 +262,10 @@ export class PlanEngine {
         label: `${route.lateOrders} stop${route.lateOrders > 1 ? 's' : ''} past deadline (${Math.round(route.lateMinutes)} min total)`,
       });
     }
-    if (depot.closeMinutes != null && route.endMinutes > depot.closeMinutes) {
+    // Depot hours repeat every day, so the comparison is against the time of
+    // day the vehicle gets back — not against an absolute minute that a
+    // multi-day route passes on its first afternoon.
+    if (depot.closeMinutes != null && (route.endMinutes % 1440) > depot.closeMinutes) {
       route.violations.push({ code: 'depot_close', severity: 'soft', label: 'Returns after depot closing time' });
     }
 

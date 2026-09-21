@@ -8,11 +8,12 @@
 import { PRIORITY, SIM } from '../../config.js';
 import { EV, emit, on } from '../../core/bus.js';
 import { el, mount, raf1, throttle, announce, debounce } from '../../util/dom.js';
-import { clock, dur, num } from '../../util/format.js';
+import { clock, dur, num, stamp, dayOf } from '../../util/format.js';
 import { icon } from '../icons.js';
 import {
   pageWithActions, card, dataTable, empty, field, fieldRow, textInput,
-  numberInput, selectInput, timeInput, locationPicker, confirmButton, statTile, chip,
+  numberInput, selectInput, timeInput, dateTimeInput, locationPicker, confirmButton, statTile, chip,
+  deferWhileEditing,
 } from '../components.js';
 
 export function ordersPage(store, map) {
@@ -34,11 +35,11 @@ export function ordersPage(store, map) {
       cmp: (a, b) => PRIORITY[b.priority].weight - PRIORITY[a.priority].weight,
     },
     { key: 'weight', label: 'Weight', right: true, get: (o) => `${num(o.weightKg)} kg`, cmp: (a, b) => b.weightKg - a.weightKg },
-    { key: 'window', label: 'Window', right: true, get: (o) => `${clock(o.windowOpen)}–${clock(o.deadline)}`, cmp: (a, b) => a.deadline - b.deadline },
-    { key: 'deadline', label: 'Due', right: true, get: (o) => clock(o.deadline), cmp: (a, b) => a.deadline - b.deadline },
+    { key: 'window', label: 'Window', right: true, get: (o) => `${stamp(o.windowOpen)}–${stamp(o.deadline)}`, cmp: (a, b) => a.deadline - b.deadline },
+    { key: 'deadline', label: 'Due', right: true, get: (o) => stamp(o.deadline), cmp: (a, b) => a.deadline - b.deadline },
     {
       key: 'eta', label: 'ETA', right: true,
-      get: (o) => (o.etaMinutes != null ? clock(o.etaMinutes) : '—'),
+      get: (o) => (o.etaMinutes != null ? stamp(o.etaMinutes) : '—'),
       cmp: (a, b) => (a.etaMinutes ?? 1e9) - (b.etaMinutes ?? 1e9),
     },
     {
@@ -114,7 +115,9 @@ export function ordersPage(store, map) {
             { tone: all.some((o) => o.status === 'unserved') ? 'red' : '' }),
           statTile('At risk', num(all.filter((o) => o.plannedLate > 0).length),
             { tone: all.some((o) => o.plannedLate > 0) ? 'amber' : '' }),
-          statTile('Total load', num(all.reduce((a, o) => a + o.weightKg, 0)), { sub: 'kg' })),
+          statTile('Total load', num(all.reduce((a, o) => a + o.weightKg, 0)), { sub: 'kg' }),
+          statTile('Plan spans', num(all.length ? Math.max(...all.map((o) => dayOf(o.deadline))) : 1),
+            { sub: 'days', tone: all.some((o) => dayOf(o.deadline) > 1) ? 'gold' : '' })),
         formOpen ? formCard() : null,
         card('Delivery book',
           el('div.row', null,
@@ -155,8 +158,12 @@ export function ordersPage(store, map) {
       Object.values(PRIORITY).map((p) => ({ value: p.key, label: p.label })),
       { value: existing?.priority || 'standard' },
     );
-    const from = timeInput({ minutes: existing?.windowOpen ?? SIM.dayStartMinutes });
-    const to = timeInput({ minutes: existing?.deadline ?? SIM.dayEndMinutes });
+    const from = dateTimeInput({
+      minutes: existing?.windowOpen ?? SIM.dayStartMinutes, planStart: store.planStart,
+    });
+    const to = dateTimeInput({
+      minutes: existing?.deadline ?? SIM.dayEndMinutes, planStart: store.planStart,
+    });
     const service = numberInput({ value: existing?.serviceMinutes ?? 6, min: 0, max: 240, suffix: 'min' });
     const goods = textInput({ value: existing?.goods || '', placeholder: 'Goods description' });
     const notes = textInput({ value: existing?.notes || '', placeholder: 'Delivery notes' });
@@ -190,7 +197,9 @@ export function ordersPage(store, map) {
         fieldRow(field('Consignee', consignee), field('Goods', goods)),
         field('Delivery address', picker, { required: true }),
         fieldRow(field('Weight', weight), field('Priority', priority), field('Service time', service)),
-        fieldRow(field('Window opens', from), field('Deadline', to)),
+        fieldRow(
+          field('Window opens', from, { hint: 'Nothing can be delivered before this.' }),
+          field('Deadline', to, { hint: 'Pick a later date for long-haul freight — this is not limited to today.' })),
         field('Notes', notes)),
       el('div.form-actions', null,
         el('button.btn', { type: 'button', text: 'Cancel', onclick: () => { formOpen = false; editing = null; render(); } }),
@@ -199,10 +208,13 @@ export function ordersPage(store, map) {
 
   const priorityTone = (p) => ({ critical: 'red', high: 'orange', standard: 'cyan', economy: '' }[p] || '');
 
-  on(EV.ENTITIES_CHANGED, render);
-  on(EV.PLAN_CHANGED, render);
-  on(EV.SELECT, render);
-  on(EV.FLEET_TICK, throttle(render, 2500));
+  // Anything the operator did not just do themselves has to wait until they
+  // are not typing into this page.
+  const background = deferWhileEditing(root, render, () => formOpen);
+  on(EV.ENTITIES_CHANGED, background);
+  on(EV.PLAN_CHANGED, background);
+  on(EV.SELECT, background);
+  on(EV.FLEET_TICK, throttle(background, 2500));
   render();
   return root;
 }

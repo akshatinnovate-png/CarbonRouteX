@@ -169,6 +169,20 @@ on each measure marked. When two options resolve to the same road — which happ
 often, and is a real finding about the journey — the card says *same road* rather
 than dressing one road up as four.
 
+**Every route is named by the roads it uses.** Six alternatives listed as
+`20.1 km · 42m`, `20.7 km · 43m`, `20.8 km · 43m` are numbers nobody can tell
+apart. OSRM reports a road name per manoeuvre, so a single highway arrives as
+dozens of fragments; CarbonRoute sums distance per name and ranks by it, which
+turns those rows into *via NH-33 · Ranchi Ring Road* and *via NH-114A · SH-9* —
+routes somebody recognises.
+
+**"When should I leave?"** Every hour of the next half-day is costed for the
+chosen road and vehicle and drawn as a strip, cleanest hour in gold. Both
+levers move: traffic changes how long the drive takes and therefore how much
+fuel it burns, and for an electric vehicle the grid's carbon intensity changes
+what that energy is worth. Clicking an hour re-plans at that time. When there
+is nothing meaningful to gain, it says so instead of nagging.
+
 **Roads found and roads chosen are two different numbers, and conflating them
 would be a lie.** When the quickest way is also the shortest, it wins on time,
 cost and carbon at once, and all four objectives land on it. That does not mean
@@ -184,9 +198,25 @@ for exactly the same distance.
 
 ### LOGISTICS — the full command centre
 
-Depots, a vehicle register, an order book, capacity/range/time-window constrained
-routing, a Pareto frontier across five objectives, a digital twin with a what-if
-engine, and a carbon ledger. This is the mode the rest of this README describes.
+Depots, a vehicle register, an order book, constrained routing, a Pareto
+frontier across five objectives, a digital twin with a what-if engine, and a
+carbon ledger. This is the mode the rest of this README describes.
+
+**Long haul works, because filling stations exist.** Range used to be a hard
+constraint on a whole route, which meant a van was declared *unable* to drive
+Ranchi to Delhi — roughly 1,300 km. That is not what range means. A vehicle
+that runs low stops and fills up, so refuelling is modelled as an event during
+the route: it consumes the driver's time, costs their wages, and pushes every
+downstream ETA. An electric van crossing India is now a **trade-off you can
+weigh** — more stops, each much slower — rather than an error message. Driver
+rest is modelled the same way: past a day's driving, the route books a long
+break instead of pretending somebody drove all night.
+
+**Time is measured in days, not minutes past midnight.** Every timestamp in the
+model is minutes from 00:00 on day one of the plan, so a deadline can sit three
+days out and the schedule can honestly say `D3 14:20`. Deliveries take a date
+*and* a time, because "Thursday afternoon" is what a long-haul deadline
+actually is.
 
 ## The tabs
 
@@ -510,7 +540,7 @@ them — the public instances are rate-limited and offer no uptime guarantee.
 node tests/engines.test.mjs
 ```
 
-82 tests, no dependencies, fully offline (the routing client's transport is stubbed
+98 tests, no dependencies, fully offline (the routing client's transport is stubbed
 to exercise the documented fallback path).
 
 **Projection** — `project`/`unproject` round-trip, world-pixel round-trip at every
@@ -546,26 +576,60 @@ duplicates are never offered twice; an absurd detour is not presented as a
 choice; a failing service stops the probe storm after the first batch; an
 unreachable router still degrades to a labelled estimate.
 
+**Long haul** — a diesel van really can drive Ranchi to Delhi, and range is
+never a hard violation; refuelling stops scale with the distance and the tank
+the vehicle left on; an electric van pays for the same haul in charging time
+and is still allowed to attempt it; a multi-day run books driver rest; a
+deadline on a later day can be met; and the fuel and rest time is inside the
+schedule rather than bolted on afterwards.
+
+**Naming a road** — fragments of one road are summed rather than listed
+separately, unnamed and trivial segments are left out, and a route with no
+named roads says nothing instead of "via undefined".
+
+**Assumed speed** — a city hop and a motorway run are not the same speed, speed
+rises with distance and levels off, and an estimated Ranchi–Delhi run is about
+a day at the wheel rather than the two days a flat 32 km/h used to imply.
+
 **Personal trip engine** — a bicycle emits and costs nothing; the fastest road is
 not automatically the greenest, and neither is the shortest; one road in means one
 road out, flagged as the same road rather than dressed up as four; an electric car
 burns the same energy at noon and at 19:00 but emits more in the evening; a custom
 consumption figure scales the estimate linearly; comparison prose never dangles
-when nothing is worse; an unreachable routing service is reported, not disguised; and **four roads found
+when nothing is worse; an unreachable routing service is reported, not disguised; **four roads found
 with one winner is reported as exactly that**, never as "there is one sensible
-road".
+road"; departure time is a real lever and the sweep finds the quiet hour without
+nagging when there is nothing to gain; and a bicycle loses proportionally less
+to rush hour than a car does.
 
 **Explanation layer** — tested for *honesty*: every driver must cite a number, an
 identical plan must claim no change, **a strictly worse plan must be described as
 worse rather than spun**, `planDiff` reassignments verified against both plans,
 carbon attribution must sum to the reported total.
 
-The UI is verified in Chromium end to end — the landing page and its live map, the
-mode chooser, both onboarding paths with live geocoding, a PERSONAL journey
-compared four ways, switching modes from Settings, the LOGISTICS optimise run and
-all ten of its tabs, a 390 px phone viewport, and the whole thing again under
-`prefers-reduced-motion` — against a local mock of the tile, routing and geocoding
-services, checking for zero page errors and no horizontal overflow.
+### The browser walkthrough
+
+```bash
+npm i -D playwright && npx playwright install chromium
+node tests/mock-services.mjs &          # stands in for tiles, OSRM, Nominatim
+python3 -m http.server 8080 &
+node tests/walkthrough.mjs              # exits non-zero on any page error
+```
+
+It drives a real Chromium through the landing page and its live map, the mode
+chooser, both onboarding paths with live geocoding, a PERSONAL journey compared
+four ways, picking a road no objective chose, the departure sweep, switching
+modes from Settings, the LOGISTICS tabs, a 390 px phone viewport and the whole
+thing again under `prefers-reduced-motion`. It fails on any page error, any
+horizontal overflow, and — the regression it was written for — **any loss of
+form input while the plan clock is running**.
+
+The mock deliberately behaves like the *stingy* public OSRM: the `alternatives`
+request returns one road, and only a via-point request finds another. That is
+the case the application has to handle well, so it is the case the test pins.
+
+Set `CARBONROUTE_SHOTS=/some/dir` to save screenshots, and
+`CARBONROUTE_CHROMIUM` to use a browser you already have.
 
 ## Limitations
 
@@ -581,15 +645,26 @@ freight.
   modelled energy. Real fleets need on-board telematics.
 - **The VRP solve is heuristic.** Simulated annealing gives good solutions, not
   provably optimal ones.
+- **Refuelling is modelled by distance, not by station.** The route knows it
+  must stop and what that costs in time and wages; it does not know which
+  forecourt, because no station dataset is wired in. Charging assumes a fast
+  charger is reachable, which is generous in some places and fair in others.
+- **Driver hours are approximated, not legislated.** A long rest after a day's
+  driving is closer to the truth than driving forever, but it is not a model of
+  any jurisdiction's rules.
 - **The public routing service caps a matrix at ~90 stops.** Beyond that the app
   says so and estimates. Run your own OSRM to lift the cap.
 - **Single-depot-return routes.** No multi-trip, no trailer swaps, no driver hours
   regulations, no cross-docking, no pickup-and-delivery pairing.
-- **Time windows are single and soft.** No multi-window customers.
+- **Time windows are single and soft.** They can now sit on any day of the
+  planning horizon, but a customer still gets one window, not several.
 - **Charging is not scheduled** — range is a constraint, not a mid-route activity.
 - **PERSONAL mode routes on the car network.** The public routing service models a
   car. A bicycle's and a motorcycle's durations are scaled from that, not routed on
   a cycle network, and the interface says so rather than implying otherwise.
+- **Traffic is the same modelled curve in both modes.** A departure-time
+  recommendation is consistent with what the fleet optimiser believes, which is
+  the point — but neither is reading live conditions.
 - **Road discovery is opportunistic, not exhaustive.** Up to eight via-point
   probes are spent per journey, in batches, and probing stops early once enough
   distinct roads are in hand or the service starts refusing. It finds the

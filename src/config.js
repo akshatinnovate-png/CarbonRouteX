@@ -29,31 +29,39 @@ export const APP = {
  *  - rangeKm         : usable range on a full tank/charge
  *  - costPerKm       : maintenance + tyres + depreciation (excl. energy)
  *  - driverCostPerHr : crew cost
+ *  - refuelMinutes   : time off the road for one fill or charge. Range is not
+ *                      a wall — filling stations exist — so this is what a long
+ *                      haul actually costs you: time, not impossibility.
  */
 export const VEHICLE_TYPES = {
   ev_van: {
     key: 'ev_van', label: 'e-Van', energyType: 'bev', capacityKg: 900,
     consumption: 21.5, unit: 'kWh/100km', loadSensitivity: 0.30, rangeKm: 240,
+    refuelMinutes: 45, // DC fast charge to ~80%
     costPerKm: 4.1, driverCostPerHr: 210, maxSpeed: 95, icon: 'van',
   },
   ev_truck: {
     key: 'ev_truck', label: 'e-Truck', energyType: 'bev', capacityKg: 4200,
     consumption: 78, unit: 'kWh/100km', loadSensitivity: 0.38, rangeKm: 210,
+    refuelMinutes: 65, // high-power charge to ~80%
     costPerKm: 9.4, driverCostPerHr: 280, maxSpeed: 85, icon: 'truck',
   },
   diesel_truck: {
     key: 'diesel_truck', label: 'Diesel Truck', energyType: 'diesel', capacityKg: 7500,
     consumption: 28.5, unit: 'L/100km', loadSensitivity: 0.42, rangeKm: 620,
+    refuelMinutes: 25, // pump, payment, walk-round
     costPerKm: 7.2, driverCostPerHr: 280, maxSpeed: 90, icon: 'truck',
   },
   diesel_van: {
     key: 'diesel_van', label: 'Diesel Van', energyType: 'diesel', capacityKg: 1400,
     consumption: 11.2, unit: 'L/100km', loadSensitivity: 0.33, rangeKm: 540,
+    refuelMinutes: 15, // pump and payment
     costPerKm: 4.6, driverCostPerHr: 210, maxSpeed: 100, icon: 'van',
   },
   cng_truck: {
     key: 'cng_truck', label: 'CNG Truck', energyType: 'cng', capacityKg: 5200,
     consumption: 32.0, unit: 'kg/100km', loadSensitivity: 0.40, rangeKm: 380,
+    refuelMinutes: 25, // CNG fill is slower than diesel
     costPerKm: 6.4, driverCostPerHr: 280, maxSpeed: 85, icon: 'truck',
   },
 };
@@ -203,6 +211,17 @@ export const TRAFFIC = {
 export const SIM = {
   dayStartMinutes: 8 * 60,     // 08:00 operational window open
   dayEndMinutes: 20 * 60,      // 20:00 close
+  /**
+   * Planning horizon, in days.
+   *
+   * All times in the model are minutes from 00:00 on day one, NOT minutes past
+   * midnight, so a deadline can legitimately read 2280 (day two, 14:00). Long
+   * haul is measured in days: Ranchi to Delhi is roughly 1,300 km, which no
+   * lawful truck completes inside one shift.
+   */
+  horizonDays: 6,
+  /** Legally-ish bounded driving before a long rest. */
+  maxDrivingMinutesPerDay: 10 * 60,
   tickMs: 1000 / 30,
   defaultSpeedMultiplier: 60,  // 1 real second = 60 simulated seconds
   speeds: [0, 15, 60, 240, 900],
