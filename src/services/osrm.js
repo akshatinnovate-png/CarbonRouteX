@@ -22,6 +22,34 @@ const DEFAULT_ENDPOINT = 'https://router.project-osrm.org';
 /** The demo server accepts at most 100 coordinates in one table request. */
 const MAX_TABLE_COORDS = 90;
 
+/* --- Finding genuinely different roads ------------------------------------
+ *
+ * OSRM's `alternatives` parameter is far more conservative than people expect.
+ * It only returns a candidate that passes its sharing, stretch and detour
+ * filters, and on the public demo server the usual answer to "give me three
+ * roads" is one road. That is a property of the request, not of the world:
+ * between most real pairs of places there are several sensible ways to go.
+ *
+ * So when the direct request comes back thin, we ask better questions instead
+ * of accepting the first answer: route again through via points offset
+ * sideways from the straight line. The router snaps each via point to the
+ * nearest real road and returns a real road route through it, which is how a
+ * genuinely different corridor — the ring road, the coastal road, the one over
+ * the bridge — gets discovered. Nothing here invents geometry; every road
+ * returned is one the routing service produced.
+ */
+
+/** How many via-point probes to spend before giving up. */
+const VIA_PROBES = 8;
+/** Probes are fired in small batches: a free public service, not a load test. */
+const PROBE_BATCH = 3;
+/** Stop probing once this many genuinely distinct roads are in hand. */
+const TARGET_ROUTES = 5;
+/** Two roads overlapping more than this fraction of their length are one road. */
+const SAME_ROAD_OVERLAP = 0.8;
+/** A road this much slower than the fastest is a detour, not a choice. */
+const MAX_STRETCH = 1.9;
+
 export class OsrmService {
   constructor({ endpoint = DEFAULT_ENDPOINT, profile = 'driving' } = {}) {
     this.endpoint = endpoint.replace(/\/$/, '');
@@ -189,45 +217,121 @@ export class OsrmService {
    * kilometre apart on a single arterial have one sensible path, and inventing
    * three would be a lie. Callers must handle a short list.
    */
-  async routeAlternatives(points, { alternatives = 3 } = {}) {
+  /**
+   * Several genuinely different road routes between two points.
+   *
+   * Strategy, in order: ask the router for alternatives; if it returns fewer
+   * distinct roads than we want, probe with via points offset sideways from
+   * the direct line until it does or until the probe budget runs out. Results
+   * are de-duplicated by how much geometry they actually share, so two
+   * near-identical roads never appear as two choices.
+   *
+   * This can still legitimately come back with one route — a village at the
+   * end of a single valley road has one way in, and inventing a second would
+   * be a lie. Callers must handle a short list.
+   */
+  async routeAlternatives(points, { alternatives = 3, probes = VIA_PROBES, want = TARGET_ROUTES } = {}) {
     if (points.length < 2) return [];
     const key = points.map((p) => `${round6(p.lon)},${round6(p.lat)}`).join(';');
-    const cacheKey = `alt:${alternatives}:${key}`;
+    const cacheKey = `alt:${want}:${key}`;
     const cached = this.routeCache.get(cacheKey);
     if (cached) { this.stats.cacheHits++; return cached; }
     if (this.inFlight.has(cacheKey)) return this.inFlight.get(cacheKey);
 
-    const url = `${this.endpoint}/route/v1/${this.profile}/${key}`
-      + `?alternatives=${alternatives}&overview=full&geometries=polyline6&steps=false`;
-
     const task = (async () => {
+      const kept = [];
+
+      /** Keep a road only if it is not one we already have. */
+      const keep = (raw, via) => {
+        const pts = decodePolyline(raw.geometry, 6);
+        if (pts.length < 2) return false;
+        const sig = geometrySignature(pts);
+        for (const k of kept) if (overlapRatio(sig, k.sig) > SAME_ROAD_OVERLAP) return false;
+        kept.push({
+          points: pts,
+          sig,
+          km: raw.distance / 1000,
+          minutes: raw.duration / 60,
+          estimated: false,
+          via: !!via,
+        });
+        return true;
+      };
+
+      const routeUrl = (coords, extra = '') => `${this.endpoint}/route/v1/${this.profile}/${coords}`
+        + `?overview=full&geometries=polyline6&steps=false${extra}`;
+
       try {
         this.stats.routeRequests++;
-        const json = await this._fetch(url);
-        const routes = (json.routes || []).map((r, i) => ({
-          id: `alt-${i}`,
-          points: decodePolyline(r.geometry, 6),
-          km: r.distance / 1000,
-          minutes: r.duration / 60,
-          estimated: false,
-        }));
-        if (!routes.length) throw new Error('routing service returned no route');
-        this.routeCache.set(cacheKey, routes);
-        return routes;
+        const json = await this._fetch(routeUrl(key, `&alternatives=${alternatives}`));
+        for (const r of json.routes || []) keep(r, false);
       } catch {
-        // One clearly-flagged straight-line estimate, never a fabricated set
-        // of "alternatives" that do not exist.
+        // The service is unreachable. One clearly-flagged straight-line
+        // estimate, never a fabricated set of "alternatives" that do not exist.
         const km = straightLineKm(points);
         return [{
-          id: 'alt-0',
-          points: points.slice(),
-          km,
-          minutes: (km / ASSUMED_SPEED_KMH) * 60,
-          estimated: true,
+          id: 'alt-0', points: points.slice(), km,
+          minutes: (km / ASSUMED_SPEED_KMH) * 60, estimated: true, via: false,
         }];
       } finally {
         this.inFlight.delete(cacheKey);
       }
+
+      if (!kept.length) {
+        const km = straightLineKm(points);
+        return [{
+          id: 'alt-0', points: points.slice(), km,
+          minutes: (km / ASSUMED_SPEED_KMH) * 60, estimated: true, via: false,
+        }];
+      }
+
+      // Probing only makes sense for a simple A-to-B journey; a multi-stop
+      // sequence already has its shape fixed by its waypoints.
+      if (points.length === 2 && kept.length < want && probes > 0) {
+        const candidates = viaCandidates(points[0], points[1], probes);
+        for (let i = 0; i < candidates.length && kept.length < want; i += PROBE_BATCH) {
+          const batch = candidates.slice(i, i + PROBE_BATCH);
+          const results = await Promise.all(batch.map(async (via) => {
+            const coords = `${round6(points[0].lon)},${round6(points[0].lat)}`
+              + `;${round6(via.lon)},${round6(via.lat)}`
+              + `;${round6(points[1].lon)},${round6(points[1].lat)}`;
+            try {
+              this.stats.routeRequests++;
+              // One attempt each: a probe is opportunistic, and retrying eight
+              // of them against a free service would be rude and slow.
+              const json = await this._fetch(routeUrl(coords), { retries: 0, timeoutMs: 12000 });
+              return json.routes?.[0] || null;
+            } catch {
+              return null;
+            }
+          }));
+          // Every probe in a batch failing means the service is unhappy with
+          // us, not that these particular roads do not exist. Stop asking.
+          if (results.every((r) => !r)) break;
+          for (const r of results) if (r) keep(r, true);
+        }
+      }
+
+      // A road far slower than the fastest is a detour somebody would regret,
+      // not a choice they would weigh. The fastest is always kept.
+      kept.sort((a, b) => a.minutes - b.minutes);
+      const limit = kept[0].minutes * MAX_STRETCH;
+      const routes = kept.filter((r, i) => i === 0 || r.minutes <= limit)
+        .map((r, i) => ({
+          id: `alt-${i}`,
+          points: r.points,
+          km: r.km,
+          minutes: r.minutes,
+          estimated: false,
+          via: r.via,
+        }));
+
+      if (this.routeCache.size > 600) {
+        let drop = 150;
+        for (const k of this.routeCache.keys()) { this.routeCache.delete(k); if (--drop <= 0) break; }
+      }
+      this.routeCache.set(cacheKey, routes);
+      return routes;
     })();
 
     this.inFlight.set(cacheKey, task);
@@ -282,6 +386,113 @@ export function straightLineMatrix(points) {
     }
   }
   return { durations, distances };
+}
+
+/* ------------------------------------------------------------------ */
+/* Finding different roads                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Via points offset sideways from the straight line between two places.
+ *
+ * Each candidate is a nudge: "go from here to there, but pass somewhere over
+ * in that direction." The router snaps it to the nearest real road, so a via
+ * point dropped in a field or a river still yields a real route — just one
+ * that leaves by a different corridor. Candidates are ordered so the gentlest
+ * nudges are spent first, because they are the ones most likely to find a road
+ * somebody would actually consider.
+ *
+ * @param {{lon:number, lat:number}} a  start
+ * @param {{lon:number, lat:number}} b  destination
+ * @param {number} n  how many candidates to generate
+ */
+export function viaCandidates(a, b, n = VIA_PROBES) {
+  const midLat = (a.lat + b.lat) / 2;
+  // Work in a locally isotropic space so a "sideways" offset is the same
+  // number of metres regardless of latitude, then convert back at the end.
+  const kx = Math.max(0.2, Math.cos((midLat * Math.PI) / 180));
+  const dx = (b.lon - a.lon) * kx;
+  const dy = b.lat - a.lat;
+  const len = Math.hypot(dx, dy);
+  if (!Number.isFinite(len) || len < 1e-7) return [];
+
+  const px = -dy / len;
+  const py = dx / len;
+  // Lateral reach scales with the journey but is capped: on a cross-country
+  // trip a 40% sideways offset would land in another country.
+  const reach = Math.min(len * 0.6, 0.55);
+
+  const plan = [
+    { t: 0.5, off: 0.16 }, { t: 0.5, off: -0.16 },
+    { t: 0.5, off: 0.34 }, { t: 0.5, off: -0.34 },
+    { t: 0.32, off: 0.24 }, { t: 0.68, off: -0.24 },
+    { t: 0.32, off: -0.24 }, { t: 0.68, off: 0.24 },
+    { t: 0.5, off: 0.6 }, { t: 0.5, off: -0.6 },
+  ];
+
+  const out = [];
+  for (const { t, off } of plan.slice(0, Math.max(0, n))) {
+    const o = off * reach;
+    out.push({
+      lon: a.lon + (dx * t + px * o) / kx,
+      lat: clampLat(a.lat + dy * t + py * o),
+    });
+  }
+  return out;
+}
+
+const clampLat = (v) => Math.max(-85, Math.min(85, v));
+
+/**
+ * A coarse spatial fingerprint of a route: the set of ~160 m cells its
+ * geometry passes through.
+ *
+ * Comparing polylines point by point is both expensive and wrong — two
+ * renderings of the same road have different vertex counts. Comparing the
+ * ground they cover is neither.
+ */
+export function geometrySignature(pts, cellMetres = 160) {
+  const set = new Set();
+  if (!pts.length) return set;
+  const latCell = cellMetres / 111320;
+
+  const stamp = (lon, lat) => {
+    const lonCell = latCell / Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+    set.add(`${Math.round(lat / latCell)}:${Math.round(lon / lonCell)}`);
+  };
+
+  // Walk the path rather than stamping its vertices. Real road geometry is
+  // dense through a town and sparse along a motorway, so a vertex-only
+  // fingerprint describes how the line was drawn instead of where it goes —
+  // and would then report the same motorway, drawn twice, as two roads.
+  stamp(pts[0].lon, pts[0].lat);
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const metres = haversineKm(a.lon, a.lat, b.lon, b.lat) * 1000;
+    // Half a cell per step guarantees no cell along the segment is skipped.
+    const steps = Math.min(2000, Math.max(1, Math.ceil(metres / (cellMetres * 0.5))));
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      stamp(a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t);
+    }
+  }
+  return set;
+}
+
+/**
+ * How much of the shorter route lies on top of the longer one, 0..1.
+ *
+ * Measured against the shorter of the two deliberately: a 5 km shortcut that
+ * runs entirely inside a 40 km route is the same road for its whole length,
+ * and should not look distinct merely because the other route is bigger.
+ */
+export function overlapRatio(a, b) {
+  if (!a.size || !b.size) return 0;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  let hits = 0;
+  for (const cell of small) if (large.has(cell)) hits++;
+  return hits / small.size;
 }
 
 export const OSRM_DEFAULT_ENDPOINT = DEFAULT_ENDPOINT;

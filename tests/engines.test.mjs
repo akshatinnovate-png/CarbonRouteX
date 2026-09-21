@@ -5,7 +5,10 @@ import {
   project, unproject, lonLatToWorld, worldToLonLat, haversineKm, bearing,
   decodePolyline, polylineKm, pointAtFraction, boundsOf, metresPerPixel,
 } from '../src/render/mercator.js';
-import { straightLineMatrix, straightLineKm, DETOUR_FACTOR, OsrmService } from '../src/services/osrm.js';
+import {
+  straightLineMatrix, straightLineKm, DETOUR_FACTOR, OsrmService,
+  viaCandidates, geometrySignature, overlapRatio,
+} from '../src/services/osrm.js';
 import { makeProvider, TILE_PROVIDERS, customProvider, DEFAULT_PROVIDER } from '../src/services/tiles.js';
 import { NetworkMatrix } from '../src/engines/matrix.js';
 import { PlanEngine, scorePlan, referenceFrom, normaliseWeights } from '../src/engines/plan.js';
@@ -675,6 +678,164 @@ suite('Workspace storage', () => {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Minimal polyline6 encoder, for building OSRM-shaped fixtures.
+ *
+ * The application only ever decodes, so this lives with the tests rather than
+ * in the source: a round-trip through the real decoder is what makes these
+ * fixtures worth anything.
+ */
+function encodePolyline6(points) {
+  const chunk = (v) => {
+    let n = v < 0 ? ~(v << 1) : v << 1;
+    let out = '';
+    while (n >= 0x20) { out += String.fromCharCode((0x20 | (n & 0x1f)) + 63); n >>= 5; }
+    return out + String.fromCharCode(n + 63);
+  };
+  let lat = 0, lon = 0, out = '';
+  for (const p of points) {
+    const la = Math.round(p.lat * 1e6);
+    const lo = Math.round(p.lon * 1e6);
+    out += chunk(la - lat) + chunk(lo - lon);
+    lat = la; lon = lo;
+  }
+  return out;
+}
+
+suite('Finding different roads', () => {
+  const A = { lon: 87.5089, lat: 21.6270 };   // Digha
+  const B = { lon: 87.3119, lat: 22.3149 };   // inland, ~80 km north
+
+  /** A polyline along the direct line, nudged sideways by `off` degrees. */
+  const line = (off, n = 60) => Array.from({ length: n }, (_, i) => {
+    const t = i / (n - 1);
+    return { lon: A.lon + (B.lon - A.lon) * t + off, lat: A.lat + (B.lat - A.lat) * t };
+  });
+
+  test('via candidates sit off the direct line, on both sides of it', () => {
+    const vias = viaCandidates(A, B, 6);
+    equal(vias.length, 6, 'one candidate per probe');
+    const side = (v) => Math.sign((B.lon - A.lon) * (v.lat - A.lat) - (B.lat - A.lat) * (v.lon - A.lon));
+    assert(vias.some((v) => side(v) > 0), 'some candidates lie to one side');
+    assert(vias.some((v) => side(v) < 0), 'and some to the other');
+    for (const v of vias) {
+      assert(Number.isFinite(v.lon) && Number.isFinite(v.lat), 'finite coordinates');
+      assert(Math.abs(v.lat) <= 85, 'latitude stays projectable');
+      greater(haversineKm(A.lon, A.lat, v.lon, v.lat), 1, 'and none collapses onto the start');
+    }
+  });
+
+  test('two points in the same place yield no candidates rather than NaN', () => {
+    equal(viaCandidates(A, { ...A }, 6).length, 0, 'no probes for a zero-length journey');
+  });
+
+  test('the same road is recognised however densely it is drawn', () => {
+    const coarse = geometrySignature(line(0, 30));
+    const dense = geometrySignature(line(0, 400));
+    // Not 1.0, and it never will be: a line crossing a square grid at an angle
+    // clips different corner cells depending on where its vertices fall. What
+    // matters is the margin over the 0.8 same-road threshold, and over what a
+    // genuinely different road scores in the next test.
+    greater(overlapRatio(coarse, dense), 0.9, 'same ground covered');
+  });
+
+  test('a road a few streets over is a different road', () => {
+    const here = geometrySignature(line(0));
+    const there = geometrySignature(line(0.05)); // ~5 km to the side
+    atMost(overlapRatio(here, there), 0.05, 'barely any shared ground');
+  });
+
+  /** An OSRM-shaped response for a polyline, at a given speed. */
+  function osrmRoute(points, kmh) {
+    const km = points.reduce((a, p, i) => (i ? a + haversineKm(points[i - 1].lon, points[i - 1].lat, p.lon, p.lat) : 0), 0);
+    return { geometry: encodePolyline6(points), distance: km * 1000, duration: (km / kmh) * 3600 };
+  }
+
+  test('a router that offers one road is probed until it offers several', async () => {
+    const svc = new OsrmService();
+    let directCalls = 0;
+    let probeCalls = 0;
+    svc._fetch = async (url) => {
+      if (url.includes('alternatives=')) {
+        directCalls++;
+        return { code: 'Ok', routes: [osrmRoute(line(0), 55)] };
+      }
+      // A via point produces a road offset toward it — a different corridor.
+      probeCalls++;
+      const off = 0.04 * (probeCalls % 2 === 0 ? 1 : -1) * Math.ceil(probeCalls / 2);
+      return { code: 'Ok', routes: [osrmRoute(line(off), 48)] };
+    };
+
+    const routes = await svc.routeAlternatives([A, B]);
+    equal(directCalls, 1, 'the router is asked for alternatives first');
+    greater(probeCalls, 0, 'and probed when it returns only one road');
+    greater(routes.length, 1, 'more than one road is found');
+    for (const r of routes) assert(!r.estimated, 'every road is real routed geometry');
+    // The fastest road must come first; the options layer relies on it.
+    for (let i = 1; i < routes.length; i++) {
+      assert(routes[i].minutes >= routes[i - 1].minutes - 1e-9, 'sorted by duration');
+    }
+  });
+
+  test('probing stops once enough distinct roads are in hand', async () => {
+    const svc = new OsrmService();
+    let calls = 0;
+    svc._fetch = async (url) => {
+      calls++;
+      if (url.includes('alternatives=')) {
+        return { code: 'Ok', routes: [0, 0.05, -0.05, 0.1].map((o) => osrmRoute(line(o), 50)) };
+      }
+      return { code: 'Ok', routes: [osrmRoute(line(0.2 * calls), 50)] };
+    };
+    await svc.routeAlternatives([A, B], { want: 4 });
+    equal(calls, 1, 'a generous router is not probed at all');
+  });
+
+  test('roads that are really the same road are not offered twice', async () => {
+    const svc = new OsrmService();
+    svc._fetch = async () => ({
+      code: 'Ok',
+      // The same road three times, drawn at different resolutions.
+      routes: [osrmRoute(line(0, 40), 50), osrmRoute(line(0, 90), 50), osrmRoute(line(0, 200), 50)],
+    });
+    const routes = await svc.routeAlternatives([A, B], { probes: 0 });
+    equal(routes.length, 1, 'de-duplicated to the one road it is');
+  });
+
+  test('an absurd detour is not presented as a choice', async () => {
+    const svc = new OsrmService();
+    svc._fetch = async (url) => {
+      if (url.includes('alternatives=')) return { code: 'Ok', routes: [osrmRoute(line(0), 60)] };
+      // Every probe finds a distinct road that takes four times as long.
+      return { code: 'Ok', routes: [osrmRoute(line(0.3), 15)] };
+    };
+    const routes = await svc.routeAlternatives([A, B]);
+    const fastest = routes[0].minutes;
+    for (const r of routes) atMost(r.minutes / fastest, 1.9, 'nothing wildly slower survives');
+  });
+
+  test('a probe storm against a failing service stops rather than retrying', async () => {
+    const svc = new OsrmService();
+    let probeCalls = 0;
+    svc._fetch = async (url) => {
+      if (url.includes('alternatives=')) return { code: 'Ok', routes: [osrmRoute(line(0), 50)] };
+      probeCalls++;
+      throw new Error('rate limited');
+    };
+    const routes = await svc.routeAlternatives([A, B]);
+    equal(routes.length, 1, 'the one road it did find is still returned');
+    atMost(probeCalls, 3, 'and probing stops after the first failed batch');
+  });
+
+  test('an unreachable router still degrades to a labelled estimate', async () => {
+    const svc = new OsrmService();
+    svc._fetch = async () => { throw new Error('connection refused'); };
+    const routes = await svc.routeAlternatives([A, B]);
+    equal(routes.length, 1, 'one route');
+    assert(routes[0].estimated, 'flagged as an estimate, not passed off as a road');
+  });
+});
+
 suite('Personal trip engine', () => {
   /**
    * Three plausible roads between the same two points: an arterial, a short
@@ -708,13 +869,37 @@ suite('Personal trip engine', () => {
 
   test('one road in means one road out, honestly labelled', () => {
     const set = buildTripOptions([ALTS[0]], { vehicleKey: 'CAR', departMinutes: 540 });
-    equal(set.distinctRoutes, 1, 'only one distinct route');
+    equal(set.roadsFound, 1, 'only one road exists');
+    equal(set.chosenRoads, 1, 'so only one road can be chosen');
     equal(set.options.length, 4, 'all four choices are still offered');
     for (const o of set.options) equal(o.trip.id, 'arterial', `${o.key} resolves to the only road`);
     const shared = set.options.filter((o) => o.sharedWith);
     equal(shared.length, 3, 'three of them are flagged as the same road as another');
     const drivers = explainTrip(set.options[0], set);
     assert(drivers.some((d) => /one sensible road/i.test(d.label)), 'and the explanation says so');
+  });
+
+  test('many roads found but one winner is reported as exactly that', () => {
+    // The shortest road is also the quickest here, so it wins on time, cost
+    // and carbon at once and all four options land on it. Claiming "one
+    // sensible road" would be false: three others were found and compared.
+    const roads = [
+      { id: 'best', km: 12.0, minutes: 20, points: [], estimated: false },
+      { id: 'b', km: 14.5, minutes: 26, points: [], estimated: false },
+      { id: 'c', km: 17.2, minutes: 29, points: [], estimated: false },
+      { id: 'd', km: 21.0, minutes: 31, points: [], estimated: false },
+    ];
+    const set = buildTripOptions(roads, { vehicleKey: 'CAR', departMinutes: 540 });
+    equal(set.roadsFound, 4, 'four roads were compared');
+    equal(set.chosenRoads, 1, 'and one of them wins on every measure');
+    for (const o of set.options) equal(o.trip.id, 'best', `${o.key} picks the winner`);
+
+    const drivers = explainTrip(set.options[0], set);
+    const claim = drivers.find((d) => /road/i.test(d.label));
+    assert(claim, 'the explanation addresses the roads');
+    assert(/4 different roads/.test(claim.label), `it reports all four: ${claim.label}`);
+    assert(!/there is one sensible road/i.test(claim.label),
+      'and never claims only one road existed');
   });
 
   test('an electric car is charged the grid intensity of the hour it travels', () => {

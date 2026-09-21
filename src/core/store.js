@@ -852,6 +852,7 @@ export class Store {
         vehicleKey: p.vehicleKey,
         ...set,
         chosen,
+        chosenRoadId: chosen?.trip?.id ?? null,
         drivers: chosen ? explainTrip(chosen, set) : [],
         versusFastest: chosen && fastest && chosen.trip.id !== fastest.trip.id
           ? compareTrips(chosen.trip, fastest.trip, { labelA: chosen.label, labelB: 'the fastest route' })
@@ -883,16 +884,46 @@ export class Store {
     if (!this.trip) return null;
     const chosen = this.trip.options.find((o) => o.key === key);
     if (!chosen) return null;
-    const fastest = this.trip.options.find((o) => o.key === 'FASTEST') || null;
-    this.trip.chosen = chosen;
-    this.trip.drivers = explainTrip(chosen, this.trip);
-    this.trip.versusFastest = fastest && chosen.trip.id !== fastest.trip.id
-      ? compareTrips(chosen.trip, fastest.trip, { labelA: chosen.label, labelB: 'the fastest route' })
-      : null;
+    this._adoptTripChoice(chosen);
     this.workspace.personal.optionKey = key;
     this.persist();
     emit(EV.TRIP_CHANGED, this.trip);
     return chosen;
+  }
+
+  /**
+   * Pick one of the roads that no objective happened to select.
+   *
+   * The four objectives frequently land on the same road, which leaves the
+   * others drawn on the map but unreachable. They are real roads that were
+   * really costed, so they are choosable: somebody who knows the route has
+   * reasons the objective function does not model — a bridge they would
+   * rather not cross again, for one.
+   */
+  selectTripRoad(roadId) {
+    if (!this.trip) return null;
+    const road = this.trip.trips.find((t) => t.id === roadId);
+    if (!road) return null;
+    this._adoptTripChoice({
+      key: 'CUSTOM',
+      label: 'Your choice',
+      blurb: 'Picked directly rather than by an objective',
+      trip: road,
+    });
+    this.workspace.personal.optionKey = null;
+    this.persist();
+    emit(EV.TRIP_CHANGED, this.trip);
+    return road;
+  }
+
+  _adoptTripChoice(chosen) {
+    const fastest = this.trip.options.find((o) => o.key === 'FASTEST') || null;
+    this.trip.chosen = chosen;
+    this.trip.chosenRoadId = chosen.trip.id;
+    this.trip.drivers = explainTrip(chosen, this.trip);
+    this.trip.versusFastest = fastest && chosen.trip.id !== fastest.trip.id
+      ? compareTrips(chosen.trip, fastest.trip, { labelA: chosen.label, labelB: 'the fastest route' })
+      : null;
   }
 
   clearTrip() {

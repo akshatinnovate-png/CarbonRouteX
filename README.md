@@ -86,6 +86,16 @@ Nothing here is a simulation of geography.
 - **Routing** — [OSRM](https://project-osrm.org/) over real OSM road geometry.
   The whole problem's travel times and distances arrive in **one** `/table`
   request; the drawn path for each route comes from `/route`.
+- **Finding different roads** — OSRM's `alternatives` parameter is far more
+  conservative than people expect: it only returns candidates that pass its
+  sharing, stretch and detour filters, and the usual answer to "give me three
+  roads" is one road. That is a property of the question, not of the world. So
+  when the direct request comes back thin, CarbonRoute asks better questions —
+  it routes again through via points offset sideways from the straight line,
+  which is how a genuinely different corridor (the ring road, the coastal road,
+  the one over the bridge) gets found. Results are de-duplicated by how much
+  ground they actually share, so the same motorway never appears twice.
+  Every road shown is one the routing service returned; nothing is invented.
 - **Geocoding** — [Nominatim](https://nominatim.openstreetmap.org/), rate-limited
   to the one-request-per-second its usage policy asks for, with results cached.
 
@@ -158,6 +168,15 @@ Every option shows **ETA, distance, energy, cost and CO₂e**, with the best val
 on each measure marked. When two options resolve to the same road — which happens
 often, and is a real finding about the journey — the card says *same road* rather
 than dressing one road up as four.
+
+**Roads found and roads chosen are two different numbers, and conflating them
+would be a lie.** When the quickest way is also the shortest, it wins on time,
+cost and carbon at once, and all four objectives land on it. That does not mean
+there was only one way to go. So the panel reports both — *"7 different roads
+compared — one wins on every measure"* — draws every road it found on the map,
+and lists the ones no objective picked as **Other roads found**, each costed and
+selectable. Somebody who knows the route has reasons the objective function does
+not model; a bridge they would rather not cross again is a perfectly good one.
 
 An electric car is charged the **grid intensity of the hour it travels**, so the
 explanation can tell you that leaving at noon instead would be measurably cleaner
@@ -425,10 +444,12 @@ personal = { vehicleKey, vehicles: [{ id, key, label, consumption }],
 trip     = { id, at, from, to, departMinutes, vehicleKey,
              trips:   [{ id, points, km, minutes, arriveMinutes, speedKmh,
                          units, unitLabel, intensity, co2,
-                         energyCost, runningCost, cost, estimated, factors }],
+                         energyCost, runningCost, cost, estimated, via, factors }],
              options: [{ key, label, blurb, trip, score, sharedWith }],
-             best, worst, distinctRoutes, estimated,
-             chosen, drivers, versusFastest }
+             best, worst, estimated,
+             roadsFound,        // distinct roads discovered
+             chosenRoads,       // how many of them the four objectives land on
+             chosen, chosenRoadId, drivers, versusFastest }
 ```
 
 ## Performance
@@ -489,7 +510,7 @@ them — the public instances are rate-limited and offer no uptime guarantee.
 node tests/engines.test.mjs
 ```
 
-71 tests, no dependencies, fully offline (the routing client's transport is stubbed
+82 tests, no dependencies, fully offline (the routing client's transport is stubbed
 to exercise the documented fallback path).
 
 **Projection** — `project`/`unproject` round-trip, world-pixel round-trip at every
@@ -516,12 +537,23 @@ window-respecting, lateness detected, aggregation sums its routes exactly.
 twice and loses none, different weights produce different plans, empty fleet and
 empty order book handled, disabling a vehicle moves its work.
 
+**Finding different roads** — via candidates land off the direct line on both
+sides of it and never collapse onto the start; a zero-length journey yields no
+candidates rather than NaN; the same road is recognised however densely its
+geometry is drawn, while a road a few streets over is not; a router offering one
+road is probed until it offers several; a generous router is not probed at all;
+duplicates are never offered twice; an absurd detour is not presented as a
+choice; a failing service stops the probe storm after the first batch; an
+unreachable router still degrades to a labelled estimate.
+
 **Personal trip engine** — a bicycle emits and costs nothing; the fastest road is
 not automatically the greenest, and neither is the shortest; one road in means one
 road out, flagged as the same road rather than dressed up as four; an electric car
 burns the same energy at noon and at 19:00 but emits more in the evening; a custom
 consumption figure scales the estimate linearly; comparison prose never dangles
-when nothing is worse; an unreachable routing service is reported, not disguised.
+when nothing is worse; an unreachable routing service is reported, not disguised; and **four roads found
+with one winner is reported as exactly that**, never as "there is one sensible
+road".
 
 **Explanation layer** — tested for *honesty*: every driver must cite a number, an
 identical plan must claim no change, **a strictly worse plan must be described as
@@ -558,9 +590,15 @@ freight.
 - **PERSONAL mode routes on the car network.** The public routing service models a
   car. A bicycle's and a motorcycle's durations are scaled from that, not routed on
   a cycle network, and the interface says so rather than implying otherwise.
-- **Road alternatives are whatever the service returns.** Often that is one road,
-  in which case all four options point at it and say *same road*. CarbonRoute will
-  not manufacture variety that does not exist.
+- **Road discovery is opportunistic, not exhaustive.** Up to eight via-point
+  probes are spent per journey, in batches, and probing stops early once enough
+  distinct roads are in hand or the service starts refusing. It finds the
+  corridors that matter; it does not enumerate every lane. If the router and the
+  probes all come back on one road, all four options point at it and say so —
+  CarbonRoute will not manufacture variety that does not exist.
+- **Probing costs requests.** A journey plan is one request plus up to eight more
+  against a free public service. Results are cached per origin–destination pair.
+  Point Settings at your own OSRM instance if you are planning at volume.
 - **Satellite imagery is a basemap, not a data source.** Nothing is derived from the
   pixels; roads, distances and durations all come from OpenStreetMap geometry.
 - **Sign-in is not authentication.** See below.

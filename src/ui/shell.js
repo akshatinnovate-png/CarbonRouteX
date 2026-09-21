@@ -290,7 +290,7 @@ export function initTopbar(store, shell) {
     if (!store.isPersonal) return;
     if (store.tripPending) { setStatus('working', 'Finding routes'); return; }
     if (store.tripError) { setStatus('alert', 'Routing unavailable'); return; }
-    setStatus('idle', trip ? `${trip.distinctRoutes} road option${trip.distinctRoutes === 1 ? '' : 's'}` : 'Ready');
+    setStatus('idle', trip ? `${trip.roadsFound} road${trip.roadsFound === 1 ? '' : 's'} compared` : 'Ready to plan');
   });
   on(EV.OPT_DONE, () => {
     const high = store.activeAlerts().filter((a) => a.severity === 'high').length;

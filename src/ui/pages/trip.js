@@ -213,13 +213,14 @@ export function tripPage(store, map) {
         co2: Math.abs(t.co2 - trip.best.co2) < 1e-4,
       };
       const isChosen = o.key === store.personal.optionKey;
+      const onChosenRoad = t.id === trip.chosenRoadId;
       return el('button.route-option', {
         type: 'button',
         'aria-pressed': String(isChosen),
         // Gold marks the one option you have chosen. Other options that
         // resolved to the same road are marked as such, but not highlighted:
         // two gold cards would leave it unclear which one the map is drawing.
-        dataset: { selected: String(isChosen), sameroad: String(!isChosen && t.id === chosenId) },
+        dataset: { selected: String(isChosen), sameroad: String(!isChosen && onChosenRoad) },
         onclick: () => {
           store.selectTripOption(o.key);
           focusEntity(map, midpointOf(t.points) || trip.to, { zoom: map.zoom, pullback: false });
@@ -239,9 +240,35 @@ export function tripPage(store, map) {
         metric('CO₂e', fkg(t.co2, 2), '', isBest.co2)));
     });
 
+    // Roads that exist, were costed, and that no objective happened to pick.
+    // They are on the map either way; leaving them unclickable would be a
+    // strange kind of half-honesty.
+    const optionRoads = new Set(trip.options.map((o) => o.trip.id));
+    const others = trip.trips.filter((t) => !optionRoads.has(t.id));
+
     const chosen = trip.chosen;
     return el('div.stack', null,
       el('div.route-options', null, ...cards),
+      others.length ? card(`Other roads found (${others.length})`,
+        chip(`${trip.roadsFound} compared`, ''),
+        el('p.field-hint', {
+          text: 'No objective picked these, but they are real roads between the same two points — '
+            + 'drawn in teal on the map. Choose one if you know something the maths does not.',
+        }),
+        el('div.stack-sm', null, ...others.map((t) => el('button.mini-row.road-row', {
+          type: 'button',
+          'aria-current': String(t.id === trip.chosenRoadId),
+          onclick: () => {
+            store.selectTripRoad(t.id);
+            focusEntity(map, midpointOf(t.points) || trip.to, { zoom: map.zoom, pullback: false });
+          },
+        },
+        el('span.mini-bar', { style: { background: 'var(--teal)' } }),
+        el('span.mini-text', null,
+          el('strong', { text: `${t.km.toFixed(1)} km · ${dur(t.minutes, { compact: true })}` }),
+          el('small', {
+            text: `arrives ${clock(Math.round(t.arriveMinutes))} · ${money(t.cost, 0)} · ${fkg(t.co2, 2)} CO₂e`,
+          })))))) : null,
       chosen ? card('Why this route',
         chip(chosen.label, 'gold'),
         el('div.explain', null,
@@ -255,7 +282,11 @@ export function tripPage(store, map) {
         el('p.basis', {
           text: trip.estimated
             ? 'Road geometry unavailable — distances are straight-line estimates. Energy, cost and CO₂e are modelled from published factors, not measured.'
-            : 'Roads and durations come from live OpenStreetMap routing. Energy, cost and CO₂e are estimates from published factors applied to that geometry — they are not measurements from your vehicle.',
+            : 'Roads and durations come from live OpenStreetMap routing. Where the router offers few '
+              + 'alternatives, further routes are found by asking it to pass through points either side of '
+              + 'the direct line — every road shown is one the routing service returned. Energy, cost and '
+              + 'CO₂e are estimates from published factors applied to that geometry, not measurements from '
+              + 'your vehicle.',
         })) : null,
       store.personal.history.length ? card('Recent journeys', null,
         el('div.stack-sm', null, ...store.personal.history.slice(0, 5).map((h) => el('div.mini-row', null,

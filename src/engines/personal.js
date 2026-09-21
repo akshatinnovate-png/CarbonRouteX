@@ -51,6 +51,7 @@ export function evaluateTrip(alt, { vehicleKey = 'CAR', departMinutes = 9 * 60, 
     id: alt.id,
     points: alt.points,
     estimated: !!alt.estimated,
+    via: !!alt.via,
     km,
     minutes,
     arriveMinutes: departMinutes + minutes,
@@ -132,7 +133,18 @@ export function buildTripOptions(alternatives, opts = {}) {
     options,
     best,
     worst,
-    distinctRoutes: seen.size,
+    /**
+     * Two different counts, and conflating them tells a lie.
+     *
+     * `roadsFound` is how many genuinely different roads exist between these
+     * two places, as far as the routing service could be persuaded to reveal.
+     * `chosenRoads` is how many of them the four objectives actually land on,
+     * which is often one: when the quickest way is also the shortest, it wins
+     * on time, cost and carbon at once. That is a fact about this journey, not
+     * evidence that there was only ever one way to go.
+     */
+    roadsFound: trips.length,
+    chosenRoads: seen.size,
     estimated: trips.some((t) => t.estimated),
   };
 }
@@ -173,11 +185,33 @@ export function explainTrip(option, set) {
   const type = PERSONAL_VEHICLES[t.vehicleKey] || PERSONAL_VEHICLES.CAR;
   const out = [];
 
-  if (set?.distinctRoutes === 1) {
+  const found = set?.roadsFound ?? 0;
+  const chosen = set?.chosenRoads ?? 0;
+
+  if (found === 1) {
     out.push({
       sign: '=',
       label: 'There is one sensible road for this journey',
-      detail: 'The routing service found no meaningfully different alternative, so every option below is the same road.',
+      detail: 'Alternatives were requested, and routes through via points either side of the '
+        + 'direct line were tried as well. They all came back on this same road, so every option '
+        + 'below is that road.',
+    });
+  } else if (found > 1 && chosen === 1) {
+    // The interesting case, and the one an honest tool must not hide behind
+    // four identical-looking cards.
+    out.push({
+      sign: '=',
+      label: `${found} different roads compared — one wins on every measure`,
+      detail: 'On this journey the quickest road is also the cheapest and the cleanest, so all '
+        + 'four objectives pick it. The others are drawn on the map in teal if you want to see '
+        + 'what you are giving up.',
+    });
+  } else if (found > 1) {
+    out.push({
+      sign: '=',
+      label: `${found} different roads compared, ${chosen} worth choosing between`,
+      detail: 'Roads overlapping for most of their length are counted once, so these are real '
+        + 'alternatives rather than the same route drawn twice.',
     });
   }
 

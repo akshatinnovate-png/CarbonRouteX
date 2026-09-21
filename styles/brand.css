@@ -394,6 +394,10 @@
 .ro-metric[data-best="true"] .v { color: var(--gold-deep); font-weight: 650; }
 .ro-metric[data-best="true"] .k { color: var(--gold); }
 
+.road-row { text-align: left; }
+.road-row .mini-text strong { font-family: var(--font-mono); font-size: 12px; }
+.road-row[aria-current="true"] { border-color: var(--gold); background: var(--gold-wash); }
+
 /* Four figures in a row, not a wrapped block: the strip is a readout. */
 .trip-hero { flex-wrap: nowrap; }
 .trip-hero:empty { display: none; }
