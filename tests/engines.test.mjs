@@ -6,15 +6,16 @@ import {
   decodePolyline, polylineKm, pointAtFraction, boundsOf, metresPerPixel,
 } from '../src/render/mercator.js';
 import { straightLineMatrix, straightLineKm, DETOUR_FACTOR, OsrmService } from '../src/services/osrm.js';
-import { makeProvider, TILE_PROVIDERS, customProvider } from '../src/services/tiles.js';
+import { makeProvider, TILE_PROVIDERS, customProvider, DEFAULT_PROVIDER } from '../src/services/tiles.js';
 import { NetworkMatrix } from '../src/engines/matrix.js';
 import { PlanEngine, scorePlan, referenceFrom, normaliseWeights } from '../src/engines/plan.js';
 import { Optimizer, paretoFront, sampleWeights } from '../src/engines/optimizer.js';
 import { comparePlans, explainRoute, planDiff, explainCarbon } from '../src/engines/explain.js';
 import { edgeEnergy, speedFactor, gradeFactor, unitsToFraction } from '../src/engines/energy.js';
 import { intensityAt, co2e, cleanestHour } from '../src/engines/emissions.js';
+import { buildTripOptions, evaluateTrip, compareTrips, explainTrip } from '../src/engines/personal.js';
 import { emptyWorkspace, importWorkspace, exportWorkspace } from '../src/core/storage.js';
-import { PRESETS, VEHICLE_TYPES, SIM } from '../src/config.js';
+import { PRESETS, VEHICLE_TYPES, SIM, PERSONAL_VEHICLES } from '../src/config.js';
 import { rng, normalize } from '../src/util/math.js';
 import { dur, clock, num } from '../src/util/format.js';
 
@@ -215,14 +216,31 @@ suite('Tile providers', () => {
       assert(url.startsWith('https://'), `${key} is https`);
       assert(!url.includes('{'), `${key} has no unsubstituted tokens: ${url}`);
       assert(url.includes('/10/'), `${key} includes the zoom`);
-      assert(p.attribution && p.attribution.includes('OpenStreetMap'), `${key} credits OpenStreetMap`);
+      // Every provider must credit its actual source. Satellite imagery is
+      // not OpenStreetMap data, so requiring that specific credit everywhere
+      // would be asserting a falsehood; what matters is that a credit exists
+      // and names a real source.
+      assert(p.attribution && p.attribution.length > 8, `${key} carries an attribution`);
+      assert(/OpenStreetMap|Esri|CARTO|OpenTopoMap/.test(p.attribution),
+        `${key} names its source: ${p.attribution}`);
     }
   });
 
   test('subdomains rotate so one host is not saturated', () => {
-    const p = makeProvider('osm', { retina: false });
+    const p = makeProvider('light', { retina: false });
     const hosts = new Set(Array.from({ length: 6 }, (_, i) => new URL(p.url(10, i, 10)).host));
     greater(hosts.size, 1, 'more than one subdomain used');
+  });
+
+  test('the default provider is a hybrid satellite basemap', () => {
+    const p = makeProvider(DEFAULT_PROVIDER, { retina: false });
+    assert(p.isImagery, 'the default basemap is real imagery');
+    assert(p.overlayLayers.length > 0, 'imagery carries a road and label overlay');
+    for (const layer of p.overlayLayers) {
+      const url = layer.url(10, 512, 340);
+      assert(url.startsWith('https://'), 'overlay tiles are https');
+      assert(!url.includes('{'), `overlay has no unsubstituted tokens: ${url}`);
+    }
   });
 
   test('a custom template is accepted and substituted', () => {
@@ -656,6 +674,81 @@ suite('Workspace storage', () => {
 });
 
 /* ------------------------------------------------------------------ */
+
+suite('Personal trip engine', () => {
+  /**
+   * Three plausible roads between the same two points: an arterial, a short
+   * congested route through town, and a longer, faster ring road.
+   */
+  const ALTS = [
+    { id: 'arterial', km: 14.2, minutes: 24, points: [{ lon: 0, lat: 0 }, { lon: 0.1, lat: 0.1 }], estimated: false },
+    { id: 'town', km: 12.1, minutes: 31, points: [{ lon: 0, lat: 0 }, { lon: 0.1, lat: 0.1 }], estimated: false },
+    { id: 'ring', km: 26.0, minutes: 21, points: [{ lon: 0, lat: 0 }, { lon: 0.1, lat: 0.1 }], estimated: false },
+  ];
+
+  test('a bicycle emits nothing and costs nothing to run', () => {
+    const t = evaluateTrip(ALTS[0], { vehicleKey: 'BIKE', departMinutes: 540 });
+    close(t.co2, 0, 1e-12, 'no emissions');
+    close(t.cost, 0, 1e-12, 'no running cost');
+    greater(t.minutes, ALTS[0].minutes, 'slower than the car the routing service modelled');
+  });
+
+  test('the fastest road is not automatically the greenest', () => {
+    const set = buildTripOptions(ALTS, { vehicleKey: 'CAR', departMinutes: 540 });
+    const fastest = set.options.find((o) => o.key === 'FASTEST').trip;
+    const greenest = set.options.find((o) => o.key === 'GREENEST').trip;
+    equal(fastest.id, 'ring', 'fastest picks the quickest road');
+    for (const t of set.trips) assert(greenest.co2 <= t.co2 + 1e-9, 'the green option really is the lowest-emission one');
+    assert(greenest.id !== fastest.id, 'and on this network it is not the fast one');
+    // The shortest road is not the cleanest either: crawling through town
+    // burns more per kilometre than the arterial does.
+    const shortest = set.trips.reduce((a, b) => (a.km <= b.km ? a : b));
+    greater(shortest.co2, greenest.co2, 'shortest is not the same as cleanest');
+  });
+
+  test('one road in means one road out, honestly labelled', () => {
+    const set = buildTripOptions([ALTS[0]], { vehicleKey: 'CAR', departMinutes: 540 });
+    equal(set.distinctRoutes, 1, 'only one distinct route');
+    equal(set.options.length, 4, 'all four choices are still offered');
+    for (const o of set.options) equal(o.trip.id, 'arterial', `${o.key} resolves to the only road`);
+    const shared = set.options.filter((o) => o.sharedWith);
+    equal(shared.length, 3, 'three of them are flagged as the same road as another');
+    const drivers = explainTrip(set.options[0], set);
+    assert(drivers.some((d) => /one sensible road/i.test(d.label)), 'and the explanation says so');
+  });
+
+  test('an electric car is charged the grid intensity of the hour it travels', () => {
+    const noon = evaluateTrip(ALTS[0], { vehicleKey: 'EV', departMinutes: 12 * 60 });
+    const evening = evaluateTrip(ALTS[0], { vehicleKey: 'EV', departMinutes: 19 * 60 });
+    close(noon.units, evening.units, 1e-9, 'the same energy either way');
+    greater(evening.co2, noon.co2, 'but the evening grid is dirtier');
+  });
+
+  test('a custom consumption figure overrides the archetype', () => {
+    const stock = evaluateTrip(ALTS[0], { vehicleKey: 'CAR', departMinutes: 540 });
+    const thirsty = evaluateTrip(ALTS[0], { vehicleKey: 'CAR', departMinutes: 540, consumption: 14.8 });
+    close(thirsty.units / stock.units, 14.8 / PERSONAL_VEHICLES.CAR.consumption, 1e-9, 'scales linearly');
+  });
+
+  test('comparison prose never dangles when nothing is worse', () => {
+    const a = evaluateTrip(ALTS[1], { vehicleKey: 'CAR', departMinutes: 540 });
+    const b = evaluateTrip(ALTS[2], { vehicleKey: 'CAR', departMinutes: 540 });
+    const text = compareTrips(a, b, { labelA: 'This route', labelB: 'the fastest route' });
+    assert(typeof text === 'string' && text.length > 20, 'produced prose');
+    assert(!/ on \.| for \./.test(text), `no dangling clause: ${text}`);
+    equal(compareTrips(a, a), null, 'a route is not compared with itself');
+  });
+
+  test('an unreachable routing service is reported, not disguised', () => {
+    const set = buildTripOptions(
+      [{ id: 'est', km: 9, minutes: 17, points: [], estimated: true }],
+      { vehicleKey: 'CAR', departMinutes: 540 },
+    );
+    assert(set.estimated, 'the set is flagged as estimated');
+    const drivers = explainTrip(set.options[0], set);
+    assert(drivers.some((d) => /straight-line estimate/i.test(d.label)), 'and said so in the explanation');
+  });
+});
 
 suite('Utilities', () => {
   test('normalize is clamped and degenerate-safe', () => {

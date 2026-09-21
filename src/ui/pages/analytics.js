@@ -103,12 +103,12 @@ export function analyticsPage(store, map) {
         { key: 'time', label: 'Time', right: true, get: (r) => dur(r.minutes, { compact: true }) },
         { key: 'load', label: 'Load', right: true, get: (r) => pct(r.capacityPct, 0) },
         { key: 'energy', label: 'Energy', right: true, get: (r) => num(r.units, 1) },
-        { key: 'co2', label: 'CO₂e', right: true, render: (r) => el('span', { style: { color: 'var(--green)' }, text: num(r.co2, 2) }) },
+        { key: 'co2', label: 'CO₂e', right: true, render: (r) => el('span', { style: { color: 'var(--success)' }, text: num(r.co2, 2) }) },
         { key: 'cost', label: 'Cost', right: true, get: (r) => money(r.cost) },
         { key: 'back', label: 'Back at', right: true, get: (r) => clock(r.endMinutes) },
         {
           key: 'ontime', label: 'On-time', right: true,
-          render: (r) => el('span', { style: { color: (r.onTime ?? 1) < 1 ? 'var(--amber)' : undefined }, text: pct(r.onTime ?? 1, 0) }),
+          render: (r) => el('span', { style: { color: (r.onTime ?? 1) < 1 ? 'var(--gold-deep)' : undefined }, text: pct(r.onTime ?? 1, 0) }),
         },
       ], {
         caption: 'Route ledger',

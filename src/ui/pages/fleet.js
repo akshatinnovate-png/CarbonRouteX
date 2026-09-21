@@ -68,7 +68,7 @@ export function fleetPage(store, map) {
       {
         key: 'callsign', label: 'Callsign', name: true,
         render: (v) => el('span.row-lead', null,
-          el('i.row-swatch', { style: { background: v.available ? vehicleColor(store.vehicles.indexOf(v)) : 'var(--red)' } }),
+          el('i.row-swatch', { style: { background: v.available ? vehicleColor(store.vehicles.indexOf(v)) : 'var(--danger)' } }),
           el('span', null, el('strong', { text: v.callsign }),
             el('small', { text: v.registration || v.driver }))),
       },
@@ -79,7 +79,7 @@ export function fleetPage(store, map) {
         key: 'energy', label: 'Energy', right: true,
         render: (v) => el('span.meter-cell', null,
           el('span.num', { text: pct(v.energyLevel, 0) }),
-          el('span.meter', { style: { '--meter-color': v.energyLevel < 0.2 ? 'var(--red)' : v.energyLevel < 0.35 ? 'var(--amber)' : 'var(--green)' } },
+          el('span.meter', { style: { '--meter-color': v.energyLevel < 0.2 ? 'var(--danger)' : v.energyLevel < 0.35 ? 'var(--gold-deep)' : 'var(--success)' } },
             el('i', { style: { width: `${Math.round(v.energyLevel * 100)}%` } }))),
       },
       {

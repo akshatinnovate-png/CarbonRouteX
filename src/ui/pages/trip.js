@@ -1,0 +1,360 @@
+/**
+ * TRIP PAGE — PERSONAL mode.
+ *
+ * One person, one vehicle, one journey. Where am I, where am I going, and
+ * which of the real roads between the two should I take?
+ *
+ * Everything the fleet side offers that does not apply to a single trip is
+ * absent here on purpose: no depots, no capacity, no duty cycle, no dispatch.
+ * What remains is the comparison that matters — time against cost against
+ * carbon — on real road geometry.
+ */
+
+import { PERSONAL_VEHICLES, PERSONAL_OPTIONS, APP } from '../../config.js';
+import { EV, emit, on } from '../../core/bus.js';
+import { el, mount, raf1, announce } from '../../util/dom.js';
+import { clock, dur, kg as fkg, money, num } from '../../util/format.js';
+import { icon } from '../icons.js';
+import { card, kv, empty, locationPicker, timeInput, chip } from '../components.js';
+import { focusEntity, frameNetwork, revealStagger, openPanel, reducedMotion } from '../motion.js';
+
+export function tripPage(store, map) {
+  const canvas = document.getElementById('map-canvas');
+  const root = el('div.trip-page');
+
+  const panel = el('aside.trip-panel');
+  const stage = el('div.map-stage', null,
+    canvas,
+    el('div.map-overlay', null,
+      el('div.map-overlay-top', null, el('div.trip-hero', { id: 'trip-hero' }), el('span.spacer'), tools()),
+      el('span'),
+      el('div.map-overlay-bottom', null,
+        el('div.map-attrib', { id: 'trip-attrib' }), el('span.spacer'))));
+
+  mount(root, panel, stage);
+
+  /** The map page and this page share one canvas; whoever is visible owns it. */
+  root.adoptCanvas = () => { if (canvas.parentElement !== stage) stage.prepend(canvas); };
+
+  function tools() {
+    const toolBtn = (name, label, fn) => el('button.tool-btn', {
+      type: 'button', title: label, 'aria-label': label, html: icon(name), onclick: fn,
+    });
+    return el('div.map-tools', null,
+      el('div.tool-group', null,
+        toolBtn('plus', 'Zoom in', () => map.zoomBy(1)),
+        toolBtn('minus', 'Zoom out', () => map.zoomBy(-1))),
+      el('div.tool-group', null,
+        toolBtn('route', 'Frame the journey', () => frameTrip()),
+        toolBtn('target', 'Go to my start point', () => {
+          const o = store.personal.origin;
+          if (o) focusEntity(map, o, { zoom: 15 });
+        })));
+  }
+
+  function frameTrip() {
+    const t = store.trip;
+    const pts = t?.chosen?.trip?.points?.length
+      ? t.chosen.trip.points
+      : [store.personal.origin, store.personal.destination].filter(Boolean);
+    if (pts.length) frameNetwork(map, pts, { padding: 120 });
+  }
+
+  /* ---------------------------------------------------------- form */
+
+  let originPicker = null;
+  let destPicker = null;
+  let departAt = null;
+  let leaveNow = store.personal.departMinutes == null;
+
+  function buildForm() {
+    const p = store.personal;
+
+    originPicker = locationPicker(store, {
+      value: p.origin, placeholder: 'Where are you starting from?',
+    });
+    destPicker = locationPicker(store, {
+      value: p.destination, placeholder: 'Where are you going?',
+    });
+    departAt = timeInput({ minutes: p.departMinutes ?? nowMinutes() });
+
+    const useMyLocation = el('button.btn.btn--sm.btn--block', {
+      type: 'button', html: `${icon('target', 12)}<span>Use my current location</span>`,
+      onclick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'Locating…';
+        const place = await currentLocation(store);
+        btn.disabled = false;
+        mount(btn, el('span', { html: `${icon('target', 12)}<span>Use my current location</span>` }));
+        if (!place) {
+          emit(EV.TOAST, {
+            message: 'Your browser would not share a location. Search for your starting point instead.',
+            tone: 'bad',
+          });
+          return;
+        }
+        originPicker.setValue(place);
+        announce(`Start set to ${place.short}`);
+        focusEntity(map, place, { zoom: 14 });
+      },
+    });
+
+    const swap = el('button.btn.btn--ghost.btn--sm.trip-swap', {
+      type: 'button', title: 'Swap start and destination', 'aria-label': 'Swap start and destination',
+      html: icon('swap', 13),
+      onclick: () => {
+        const a = originPicker.getValue();
+        const b = destPicker.getValue();
+        originPicker.setValue(b);
+        destPicker.setValue(a);
+        announce('Start and destination swapped');
+      },
+    });
+
+    return el('div.trip-form', null,
+      el('div.trip-endpoints', null,
+        el('div.trip-endpoint', null,
+          el('span.trip-dot', { dataset: { kind: 'start' } }),
+          el('div.trip-endpoint-body', null,
+            el('span.label', { text: 'Start' }),
+            originPicker,
+            useMyLocation)),
+        swap,
+        el('div.trip-endpoint', null,
+          el('span.trip-dot', { dataset: { kind: 'end' } }),
+          el('div.trip-endpoint-body', null,
+            el('span.label', { text: 'Destination' }),
+            destPicker))),
+
+      el('div.trip-field', null,
+        el('span.label', { text: 'Vehicle' }),
+        el('div.vehicle-picker', { role: 'radiogroup', 'aria-label': 'Vehicle type' },
+          ...Object.values(PERSONAL_VEHICLES).map((v) => el('button.vehicle-chip', {
+            type: 'button', role: 'radio',
+            'aria-checked': String(store.personal.vehicleKey === v.key),
+            title: v.note,
+            onclick: () => { store.setPersonal({ vehicleKey: v.key }); render(); recompute(); },
+          },
+          el('span.vc-icon', { html: icon(v.icon, 15) }),
+          el('span.vc-label', { text: v.label }))))),
+
+      el('div.trip-field', null,
+        el('span.label', { text: 'Departure' }),
+        el('div.row.wrap', null,
+          el('div.segmented', { role: 'group', 'aria-label': 'Departure time' },
+            el('button', {
+              type: 'button', text: 'Leave now', 'aria-pressed': String(leaveNow),
+              onclick: () => { leaveNow = true; render(); },
+            }),
+            el('button', {
+              type: 'button', text: 'At a set time', 'aria-pressed': String(!leaveNow),
+              onclick: () => { leaveNow = false; render(); },
+            })),
+          leaveNow ? null : departAt)),
+
+      el('button.btn-optimize', {
+        type: 'button',
+        disabled: store.tripPending,
+        html: store.tripPending
+          ? `<span class="spin">${icon('refresh', 15)}</span><span>Finding routes…</span>`
+          : `${icon('bolt', 15)}<span>Compare routes</span>`,
+        onclick: () => recompute(),
+      }));
+  }
+
+  async function recompute() {
+    const origin = originPicker?.getValue() || store.personal.origin;
+    const destination = destPicker?.getValue() || store.personal.destination;
+    if (!origin || !destination) {
+      emit(EV.TOAST, { message: 'Set both a start and a destination first.', tone: 'bad' });
+      return;
+    }
+    const departMinutes = leaveNow ? null : departAt?.getMinutes();
+    const trip = await store.planTrip({ origin, destination, departMinutes });
+    if (trip) {
+      frameNetwork(map, trip.chosen?.trip?.points || [origin, destination], { padding: 130 });
+      announce(`${trip.options.length} route options compared`);
+      // The answer is below the form, so bring it into view rather than
+      // leaving somebody to wonder whether anything happened.
+      requestAnimationFrame(() => {
+        panel.querySelector('.route-options')?.scrollIntoView({
+          behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start',
+        });
+      });
+    }
+  }
+
+  /* -------------------------------------------------------- results */
+
+  function resultsBlock() {
+    if (store.tripError) {
+      return el('div.notice.notice--bad', null,
+        el('span', { html: icon('alert', 15) }),
+        el('p', { text: store.tripError }));
+    }
+    if (store.tripPending) {
+      return el('div.trip-loading', null,
+        el('div.progress', null, el('i', { style: { width: '45%' } })),
+        el('p.dim', { text: 'Asking the routing service for real road alternatives…' }));
+    }
+    const trip = store.trip;
+    if (!trip) {
+      return empty('No journey compared yet.',
+        'Set a start and a destination, then compare routes.');
+    }
+
+    const chosenId = trip.chosen?.trip?.id;
+    const cards = trip.options.map((o) => {
+      const t = o.trip;
+      const isBest = {
+        time: Math.abs(t.minutes - trip.best.minutes) < 0.01,
+        cost: Math.abs(t.cost - trip.best.cost) < 0.01,
+        co2: Math.abs(t.co2 - trip.best.co2) < 1e-4,
+      };
+      const isChosen = o.key === store.personal.optionKey;
+      return el('button.route-option', {
+        type: 'button',
+        'aria-pressed': String(isChosen),
+        // Gold marks the one option you have chosen. Other options that
+        // resolved to the same road are marked as such, but not highlighted:
+        // two gold cards would leave it unclear which one the map is drawing.
+        dataset: { selected: String(isChosen), sameroad: String(!isChosen && t.id === chosenId) },
+        onclick: () => {
+          store.selectTripOption(o.key);
+          focusEntity(map, midpointOf(t.points) || trip.to, { zoom: map.zoom, pullback: false });
+        },
+      },
+      el('div.ro-head', null,
+        el('strong', { text: o.label }),
+        el('span.ro-time', { text: dur(t.minutes, { compact: true }) }),
+        el('span.spacer'),
+        o.sharedWith ? chip('same road', '') : null),
+      el('p.ro-blurb', { text: o.blurb }),
+      el('div.ro-metrics', null,
+        metric('ETA', clock(Math.round(t.arriveMinutes)), '', isBest.time),
+        metric('Distance', `${t.km.toFixed(1)}`, 'km', false),
+        metric('Energy', t.units > 0 ? t.units.toFixed(2) : '0', t.unitLabel || 'none', false),
+        metric('Cost', money(t.cost, 0), APP.currency, isBest.cost),
+        metric('CO₂e', fkg(t.co2, 2), '', isBest.co2)));
+    });
+
+    const chosen = trip.chosen;
+    return el('div.stack', null,
+      el('div.route-options', null, ...cards),
+      chosen ? card('Why this route',
+        chip(chosen.label, 'gold'),
+        el('div.explain', null,
+          el('div.why-title', { text: 'What produced this answer' }),
+          trip.versusFastest ? el('p', { text: trip.versusFastest }) : null,
+          el('ul.drivers', null, ...trip.drivers.map((d) => el('li', { dataset: { sign: d.sign } },
+            el('span.sign', { text: d.sign }),
+            el('span', null,
+              el('span.d-label', { text: d.label }),
+              el('span.d-detail', { text: d.detail })))))),
+        el('p.basis', {
+          text: trip.estimated
+            ? 'Road geometry unavailable — distances are straight-line estimates. Energy, cost and CO₂e are modelled from published factors, not measured.'
+            : 'Roads and durations come from live OpenStreetMap routing. Energy, cost and CO₂e are estimates from published factors applied to that geometry — they are not measurements from your vehicle.',
+        })) : null,
+      store.personal.history.length ? card('Recent journeys', null,
+        el('div.stack-sm', null, ...store.personal.history.slice(0, 5).map((h) => el('div.mini-row', null,
+          el('span.mini-bar', { style: { background: 'var(--teal)' } }),
+          el('span.mini-text', null,
+            el('strong', { text: `${h.from} → ${h.to}` }),
+            el('small', {
+              text: [h.km != null ? `${h.km.toFixed(1)} km` : null,
+                h.co2 != null ? `${h.co2.toFixed(2)} kg CO₂e` : null,
+                h.option ? optionLabel(h.option) : null].filter(Boolean).join(' · '),
+            })))))) : null);
+  }
+
+  const metric = (label, value, unit, best) => el('div.ro-metric', { dataset: { best: String(!!best) } },
+    el('span.k', { text: label }),
+    el('span.v', null, el('span.num', { text: String(value) }), unit ? el('small', { text: unit }) : null));
+
+  /* ---------------------------------------------------------- render */
+
+  const render = raf1(() => {
+    mount(panel,
+      el('div.trip-panel-inner', null,
+        el('header.trip-head', null,
+          el('span.eyebrow', { text: 'Personal mobility' }),
+          el('h1', { text: 'Plan a journey' }),
+          el('p', { text: 'Real roads, compared four ways. Time, cost and carbon are not the same route.' })),
+        buildForm(),
+        el('div.hr'),
+        resultsBlock()));
+    renderHero();
+    openPanel(panel, { from: 'left' });
+    revealStagger(panel.querySelectorAll('.route-option'));
+  });
+
+  function renderHero() {
+    const host = document.getElementById('trip-hero');
+    if (!host) return;
+    const t = store.trip?.chosen?.trip;
+    if (!t) { mount(host); host.className = 'trip-hero'; return; }
+    host.className = 'trip-hero hero-strip';
+    mount(host,
+      stat('ETA', clock(Math.round(t.arriveMinutes)), '', 'gold'),
+      stat('Journey', dur(t.minutes, { compact: true }), ''),
+      stat('Distance', t.km.toFixed(1), 'km'),
+      stat('CO₂e', t.co2.toFixed(2), 'kg', 'green'));
+    const attrib = document.getElementById('trip-attrib');
+    if (attrib) {
+      attrib.className = 'map-attrib attrib-bar';
+      mount(attrib, el('span', {
+        text: store.trip.estimated
+          ? 'Straight-line estimate — routing service unreachable'
+          : 'Roads © OpenStreetMap contributors · Imagery © Esri',
+      }));
+    }
+  }
+
+  const stat = (k, v, sub, tone = '') => el('div.hero-stat', { dataset: { tone } },
+    el('span.k', { text: k }),
+    el('span.v', null, v, sub ? el('small', { text: sub }) : null));
+
+  on(EV.TRIP_CHANGED, render);
+  on(EV.ENTITIES_CHANGED, render);
+  render();
+  return root;
+}
+
+/* ------------------------------------------------------------------ */
+
+const optionLabel = (key) => PERSONAL_OPTIONS.find((o) => o.key === key)?.label || key;
+
+const nowMinutes = () => {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+};
+
+function midpointOf(points) {
+  if (!points?.length) return null;
+  return points[Math.floor(points.length / 2)];
+}
+
+/**
+ * The browser's own geolocation, reverse-geocoded to a readable place.
+ * Resolves to null rather than throwing when permission is refused, because a
+ * refused location is an ordinary answer and not an error state.
+ */
+function currentLocation(store) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { longitude: lon, latitude: lat } = pos.coords;
+        try {
+          resolve(await store.geocode.reverse(lon, lat));
+        } catch {
+          resolve({ lon, lat, label: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, short: 'My location' });
+        }
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 60000 },
+    );
+  });
+}

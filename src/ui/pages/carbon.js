@@ -66,7 +66,7 @@ export function carbonPage(store, map) {
       el('div.stack-sm', null,
         el('div.row-between', null,
           el('span.eyebrow', { text: 'Total planned' }),
-          el('span.num', { style: { fontSize: '18px', color: 'var(--green)' }, text: fkg(total, 1) })),
+          el('span.num', { style: { fontSize: '18px', color: 'var(--success)' }, text: fkg(total, 1) })),
         groups.length
           ? el('div.bar-rows', { style: { maxHeight: '320px', overflowY: 'auto' } },
             ...groups.slice(0, 16).map((g) => el('div.bar-row', null,
@@ -104,7 +104,7 @@ export function carbonPage(store, map) {
     const best = cleanestHour(6, 22);
     requestAnimationFrame(() => lineChart(canvas, [{
       points: ENERGY.gridIntensity.map((v, h) => ({ x: h, y: v })),
-      color: C.green, width: 2, fill: true,
+      color: C.success, width: 2, fill: true,
     }], {
       height: 160, xLabel: 'Hour of day', yLabel: 'kg CO₂e / kWh',
       xFormat: (v) => `${String(Math.round(v)).padStart(2, '0')}:00`,
@@ -123,7 +123,7 @@ export function carbonPage(store, map) {
         el('dl.kv', null,
           ...kv('Battery-electric routes', num(evRoutes.length)),
           ...kv('Grid energy drawn', `${num(evEnergy, 1)} kWh`),
-          ...kv('Electric CO₂e', fkg(evCo2, 2), 'var(--green)'),
+          ...kv('Electric CO₂e', fkg(evCo2, 2), 'var(--success)'),
           ...kv('Intensity now', `${num(nowIntensity, 2)} kg/kWh`),
           ...kv('Cleanest hour', `${String(best.hour).padStart(2, '0')}:00 · ${num(best.intensity, 2)} kg/kWh`)),
         evEnergy > 0 ? el('div.explain', null,

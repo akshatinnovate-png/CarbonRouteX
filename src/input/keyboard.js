@@ -12,10 +12,12 @@
 import { isTypingTarget, announce } from '../util/dom.js';
 import { EV, emit } from '../core/bus.js';
 
-const TAB_KEYS = {
-  1: 'map', 2: 'optimize', 3: 'simulation', 4: 'depots',
-  5: 'fleet', 6: 'orders', 7: 'analytics', 8: 'carbon', 9: 'events',
-};
+/**
+ * Number keys address whatever tabs the current mode actually has, rather than
+ * a fixed logistics list — pressing 4 in PERSONAL mode should not try to open
+ * a Depots tab that does not exist there.
+ */
+const tabForDigit = (shell, digit) => shell.tabs?.[digit - 1]?.key ?? null;
 
 export function initKeyboard(store, { map, shell, help }) {
   const held = new Set();
@@ -51,30 +53,33 @@ export function initKeyboard(store, { map, shell, help }) {
       return;
     }
 
-    if (TAB_KEYS[e.key]) {
-      e.preventDefault();
-      shell.show(TAB_KEYS[e.key]);
+    if (/^[1-9]$/.test(e.key)) {
+      const key = tabForDigit(shell, Number(e.key));
+      if (key) { e.preventDefault(); shell.show(key); }
       return;
     }
 
     switch (e.key) {
       case 'o': case 'O':
         e.preventDefault();
-        store.optimizeFleet({ trigger: 'Keyboard shortcut' });
+        if (store.isPersonal) shell.show('trip');
+        else store.optimizeFleet({ trigger: 'Keyboard shortcut' });
         break;
       case 's': case 'S':
+        if (store.isPersonal) break;
         e.preventDefault();
         shell.show('simulation');
         break;
       case 'm': case 'M':
         e.preventDefault();
-        shell.show('map');
+        shell.show(store.isPersonal ? 'trip' : 'map');
         break;
       case '+': case '=':
         e.preventDefault(); map.zoomBy(1); break;
       case '-': case '_':
         e.preventDefault(); map.zoomBy(-1); break;
       case ' ':
+        if (store.isPersonal) break;   // there is no plan clock in PERSONAL mode
         e.preventDefault();
         store.togglePlay();
         announce(store.playing ? 'Clock running' : 'Clock paused');

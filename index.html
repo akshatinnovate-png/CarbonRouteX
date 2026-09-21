@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#0d8f8f">
 <meta name="description" content="CarbonRoute — an AI logistics command centre that plans a real delivery fleet over real roads, optimising time, cost and carbon together.">
 <title>CarbonRoute — AI Logistics Intelligence</title>
 
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23152031'/><path d='M7 21c4-9 14-9 18 0' stroke='%2334d99a' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='7' cy='21' r='3' fill='%2362c8f8'/><circle cx='25' cy='21' r='3' fill='%2334d99a'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ffffff'/><path d='M7 21.5c4-10 14-10 18 0' stroke='%230d8f8f' stroke-width='2.8' fill='none' stroke-linecap='round'/><circle cx='7' cy='21.5' r='3' fill='%2307636a'/><circle cx='25' cy='21.5' r='3' fill='%23b08423'/></svg>">
 
 <link rel="stylesheet" href="styles/tokens.css">
 <link rel="stylesheet" href="styles/layout.css">
 <link rel="stylesheet" href="styles/components.css">
+<link rel="stylesheet" href="styles/brand.css">
 </head>
 <body>
 
@@ -21,6 +23,9 @@
      announced here, so the map is never the only way to know something. -->
 <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- ============ LANDING / MODE CHOOSER ============ -->
+<div class="landing-host" id="landing" role="dialog" aria-modal="true" aria-label="CarbonRoute" hidden></div>
 
 <!-- ============ SIGN-IN / SETUP ============ -->
 <div class="onboarding" id="onboarding" role="dialog" aria-modal="true" aria-label="Sign in and set up" hidden></div>
@@ -32,15 +37,15 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32" fill="none">
-          <path d="M6 22c4-10 16-10 20 0" stroke="#34d99a" stroke-width="2.8" stroke-linecap="round"/>
-          <circle cx="6" cy="22" r="3.2" fill="#62c8f8"/>
-          <circle cx="26" cy="22" r="3.2" fill="#34d99a"/>
-          <circle cx="16" cy="13.5" r="2.2" fill="#f2f6fb"/>
+          <path d="M6 22c4-10 16-10 20 0" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+          <circle cx="6" cy="22" r="3.2" fill="#ffffff"/>
+          <circle cx="26" cy="22" r="3.2" fill="#d4a843"/>
+          <circle cx="16" cy="13.2" r="2.2" fill="#d4a843"/>
         </svg>
       </span>
       <span class="brand-text">
         <span class="brand-name">Carbon<b>Route</b></span>
-        <span class="brand-sub">Logistics Command</span>
+        <span class="brand-sub">Logistics Intelligence</span>
       </span>
     </div>
 
@@ -78,7 +83,7 @@
 <!-- The map canvas lives outside the page host so it is never destroyed and
      recreated when the operator switches tabs; the map page adopts it. -->
 <canvas id="map-canvas" tabindex="0" role="application"
-        aria-label="Live logistics map over OpenStreetMap. Arrow keys pan when focused, plus and minus zoom. The Orders tab is a complete text equivalent of everything shown here."></canvas>
+        aria-label="Live logistics map over real satellite imagery. Arrow keys pan when focused, plus and minus zoom. The Orders tab is a complete text equivalent of everything shown here."></canvas>
 
 <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
@@ -117,7 +122,7 @@
 </dialog>
 
 <noscript>
-  <div style="padding:40px;max-width:60ch;margin:0 auto;font-family:sans-serif;color:#f2f6fb;background:#0d1420">
+  <div style="padding:40px;max-width:60ch;margin:0 auto;font-family:sans-serif;color:#123040;background:#ffffff">
     <h1>CarbonRoute</h1>
     <p>This application is a client-side optimisation and mapping engine and requires
     JavaScript. Your data stays in your browser; the only network requests are to

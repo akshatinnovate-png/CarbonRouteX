@@ -70,6 +70,10 @@ export function numberInput({ value = 0, min, max, step = 1, suffix, ...rest } =
     ...(max != null ? { max: String(max) } : {}),
     ...rest,
   });
+  // Callers always read `.input`, whether or not a suffix wrapped the field.
+  // Without this the bare-input case silently has no `.input` and the caller
+  // throws at the moment it tries to read the value back.
+  input.input = input;
   if (!suffix) return input;
   const wrap = el('div.input-suffix', null, input, el('span.suffix', { text: suffix }));
   // The caller wires up `wrap.input`, so the suffix is purely presentational.

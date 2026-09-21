@@ -75,6 +75,8 @@ export class TileMap {
       toLonLat: (x, y) => this.toLonLat(x, y),
       time: this.time,
       reducedMotion: this.reducedMotion,
+      theme: this.provider?.theme || 'light',
+      isImagery: !!this.provider?.isImagery,
     };
   }
 
@@ -129,7 +131,7 @@ export class TileMap {
   /* Navigation                                                        */
   /* ---------------------------------------------------------------- */
 
-  setView(lon, lat, zoom, { animate = true } = {}) {
+  setView(lon, lat, zoom, { animate = true, duration = 620 } = {}) {
     const z = clamp(zoom ?? this.zoom, MIN_ZOOM, MAX_ZOOM);
     if (!animate || this.reducedMotion) {
       this.centre = { lon, lat };
@@ -142,7 +144,7 @@ export class TileMap {
       from: { ...this.centre, zoom: this.zoom },
       to: { lon, lat, zoom: z },
       start: performance.now(),
-      duration: 620,
+      duration,
     };
   }
 
@@ -304,10 +306,10 @@ export class TileMap {
   /* Tiles                                                             */
   /* ---------------------------------------------------------------- */
 
-  _tileKey(z, x, y) { return `${z}/${x}/${y}`; }
+  _tileKey(z, x, y, layerKey = 'base') { return `${layerKey}|${z}/${x}/${y}`; }
 
-  _getTile(z, x, y) {
-    const key = this._tileKey(z, x, y);
+  _getTile(z, x, y, layer = this.provider, layerKey = 'base') {
+    const key = this._tileKey(z, x, y, layerKey);
     const existing = this.tiles.get(key);
     if (existing) return existing;
     if (this.failedTiles.has(key) || this.pending.has(key)) return null;
@@ -316,7 +318,7 @@ export class TileMap {
     if (y < 0 || y >= n) return null;
     const wrappedX = ((x % n) + n) % n;
 
-    const entry = { img: new Image(), loaded: false, failed: false, z, x: wrappedX, y };
+    const entry = { img: new Image(), loaded: false, failed: false, z, x: wrappedX, y, layerKey };
     entry.img.crossOrigin = 'anonymous';
     entry.img.decoding = 'async';
     this.pending.add(key);
@@ -334,7 +336,7 @@ export class TileMap {
       this.tilesFailing = (this.tilesFailing || 0) + 1;
       this.needsRedraw = true;
     };
-    entry.img.src = this.provider.url(z, wrappedX, y);
+    entry.img.src = layer.url(z, wrappedX, y);
     return null;
   }
 
@@ -391,6 +393,23 @@ export class TileMap {
         }
       }
     }
+
+    // Hybrid: transparent reference layers (roads, boundaries, place names)
+    // composited over imagery. Satellite without labels is beautiful and
+    // useless for dispatch; this is what makes it operational.
+    for (const overlay of this.provider.overlayLayers || []) {
+      const oz = Math.min(z, overlay.maxZoom ?? z);
+      if (oz !== z) continue;
+      for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+          const tile = this._getTile(z, x, y, overlay, overlay.key);
+          if (tile && tile.loaded) {
+            ctx.drawImage(tile.img, originX + x * tilePx, originY + y * tilePx, tilePx + 1, tilePx + 1);
+          }
+        }
+      }
+    }
+
     this.tilesDrawn = drawn;
     this.tilesMissing = missing;
   }
@@ -402,7 +421,7 @@ export class TileMap {
       if (pz < MIN_ZOOM) return;
       const f = 1 << up;
       const px = Math.floor(x / f), py = Math.floor(y / f);
-      const parent = this.tiles.get(this._tileKey(pz, ((px % (1 << pz)) + (1 << pz)) % (1 << pz), py));
+      const parent = this.tiles.get(this._tileKey(pz, ((px % (1 << pz)) + (1 << pz)) % (1 << pz), py, 'base'));
       if (!parent || !parent.loaded) continue;
       const sub = TILE_SIZE / f;
       const sx = (x - px * f) * sub;

@@ -40,6 +40,9 @@ export function mapPage(store, map) {
 
   mount(root, stage, inspector);
 
+  /** This page and the PERSONAL journey page share one canvas. */
+  root.adoptCanvas = () => { if (canvas.parentElement !== stage) stage.prepend(canvas); };
+
   /* ------------------------------------------------------- tools */
 
   function tools() {
@@ -261,9 +264,9 @@ export function mapPage(store, map) {
             ...kv('Routes', num(plan.routes.filter((r) => r.orderIds.length).length)),
             ...kv('Distance', fkm(plan.metrics.km, 0)),
             ...kv('Fleet time', dur(plan.metrics.minutes)),
-            ...kv('CO₂e', fkg(plan.metrics.co2, 1), 'var(--green)'),
+            ...kv('CO₂e', fkg(plan.metrics.co2, 1), 'var(--success)'),
             ...kv('Cost', money(plan.metrics.cost)),
-            ...kv('Unserved', num(plan.metrics.unserved), plan.metrics.unserved ? 'var(--red)' : undefined))
+            ...kv('Unserved', num(plan.metrics.unserved), plan.metrics.unserved ? 'var(--danger)' : undefined))
           : empty('No plan yet.', 'Open the Optimise tab and run the optimiser.')),
       card('Selection', null, empty('Click a vehicle, stop, depot or route on the map to inspect it.')));
   }
@@ -292,7 +295,7 @@ export function mapPage(store, map) {
             ...kv('Registration', v.registration || '—'),
             ...kv('Depot', store.depotsById.get(v.depotId)?.name || '—'),
             ...kv('Capacity', `${num(type.capacityKg)} kg`),
-            ...kv('Energy', pct(v.energyLevel, 0), v.energyLevel < 0.2 ? 'var(--red)' : undefined),
+            ...kv('Energy', pct(v.energyLevel, 0), v.energyLevel < 0.2 ? 'var(--danger)' : undefined),
             ...kv('Range left', fkm(type.rangeKm * v.energyLevel, 0))),
           route && route.orderIds.length
             ? el('div.stack-sm', { style: { marginTop: '12px' } },
@@ -302,7 +305,7 @@ export function mapPage(store, map) {
                 ...kv('Distance', fkm(route.km)),
                 ...kv('Duration', dur(route.minutes)),
                 ...kv('Energy', `${num(route.units, 1)} ${energyUnitLabel(v.type)}`),
-                ...kv('CO₂e', fkg(route.co2, 2), 'var(--green)'),
+                ...kv('CO₂e', fkg(route.co2, 2), 'var(--success)'),
                 ...kv('Cost', money(route.cost)),
                 ...kv('Payload', `${num(route.capacityUsedKg)} kg · ${pct(route.capacityPct, 0)}`),
                 ...kv('Back at', clock(route.endMinutes))),
@@ -332,7 +335,7 @@ export function mapPage(store, map) {
       type: 'button',
       onclick: () => { store.select('order', s.orderId, { force: true }); map.setView(s.lon, s.lat, 15); },
     },
-    el('span.mini-bar', { style: { background: late ? 'var(--red)' : delivered ? 'var(--green)' : PRIORITY[s.priority]?.color || 'var(--cyan)' } }),
+    el('span.mini-bar', { style: { background: late ? 'var(--danger)' : delivered ? 'var(--success)' : PRIORITY[s.priority]?.color || 'var(--teal)' } }),
     el('span.mini-text', null,
       el('strong', { text: `${i + 1}. ${o?.ref || s.orderId} · ${s.consignee}` }),
       el('small', { text: `${clock(s.serviceStart)} · ${num(s.weightKg)} kg${late ? ` · ${dur(s.late)} late` : ''}` })));
@@ -352,11 +355,11 @@ export function mapPage(store, map) {
             ...kv('Duration', dur(r.minutes)),
             ...kv('Driving / service', `${dur(r.drivingMinutes)} / ${dur(r.serviceMinutes)}`),
             ...kv('Energy', `${num(r.units, 1)} ${energyUnitLabel(r.vehicleType)}`),
-            ...kv('CO₂e', fkg(r.co2, 2), 'var(--green)'),
+            ...kv('CO₂e', fkg(r.co2, 2), 'var(--success)'),
             ...kv('Cost', money(r.cost)),
             ...kv('Stops', num(r.stops.length)),
             ...kv('Utilisation', pct(r.capacityPct, 0)),
-            ...kv('On-time', pct(r.onTime ?? 1, 0), (r.onTime ?? 1) < 1 ? 'var(--amber)' : undefined)),
+            ...kv('On-time', pct(r.onTime ?? 1, 0), (r.onTime ?? 1) < 1 ? 'var(--gold-deep)' : undefined)),
           ex ? el('div.explain', { style: { marginTop: '12px' } },
             el('div.why-title', { text: 'Why this route?' }),
             el('p', { text: ex.summary }),
@@ -367,7 +370,7 @@ export function mapPage(store, map) {
                 el('span.d-detail', { text: d.detail }))))),
             el('p.basis', { text: ex.basis })) : null,
           r.geometryEstimated ? el('p.basis', {
-            style: { color: 'var(--amber)' },
+            style: { color: 'var(--gold-deep)' },
             text: 'The line drawn for this route is a straight-line estimate — the routing service did not return road geometry.',
           }) : null,
           el('button.btn.btn--sm.btn--block', {
@@ -391,10 +394,10 @@ export function mapPage(store, map) {
             ...kv('Priority', PRIORITY[o.priority].label, PRIORITY[o.priority].color),
             ...kv('Weight', `${num(o.weightKg)} kg`),
             ...kv('Window', `${clock(o.windowOpen)} – ${clock(o.deadline)}`),
-            ...kv('ETA', o.etaMinutes != null ? clock(o.etaMinutes) : '—', stop?.late > 0 ? 'var(--red)' : undefined),
+            ...kv('ETA', o.etaMinutes != null ? clock(o.etaMinutes) : '—', stop?.late > 0 ? 'var(--danger)' : undefined),
             ...kv('Slack', stop ? dur(stop.deadline - stop.serviceStart) : '—'),
             ...kv('Vehicle', o.assignedVehicle ? store.vehiclesById.get(o.assignedVehicle)?.callsign : 'Unassigned',
-              o.assignedVehicle ? undefined : 'var(--red)')),
+              o.assignedVehicle ? undefined : 'var(--danger)')),
           o.notes ? el('p.basis', { text: o.notes }) : null,
           el('button.btn.btn--sm.btn--block', {
             type: 'button', html: `${icon('target', 12)}<span>Focus on map</span>`,
@@ -419,7 +422,7 @@ export function mapPage(store, map) {
             ...kv('Closes', clock(d.closeMinutes)),
             ...kv('Vehicles based here', num(fleet.length)),
             ...kv('Active routes', num(routes.length)),
-            ...kv('Planned CO₂e', fkg(routes.reduce((a, r) => a + r.co2, 0), 1), 'var(--green)')),
+            ...kv('Planned CO₂e', fkg(routes.reduce((a, r) => a + r.co2, 0), 1), 'var(--success)')),
           el('button.btn.btn--sm.btn--block', {
             type: 'button', html: `${icon('target', 12)}<span>Focus on map</span>`,
             style: { marginTop: '10px' },

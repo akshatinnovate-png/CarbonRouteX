@@ -27,7 +27,7 @@ function prep(canvas, height) {
 
 function axes(ctx, box, { xTicks = [], yTicks = [], xLabel, yLabel }) {
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,.06)';
+  ctx.strokeStyle = 'rgba(18, 48, 64, .09)';
   ctx.lineWidth = 1;
   ctx.font = '9px ui-monospace, monospace';
   ctx.fillStyle = C.faint;
@@ -102,7 +102,7 @@ export function lineChart(canvas, series, opts = {}) {
       ctx.lineTo(px(s.points[s.points.length - 1]), box.y + box.h);
       ctx.closePath();
       const g = ctx.createLinearGradient(0, box.y, 0, box.y + box.h);
-      g.addColorStop(0, withAlpha(s.color, 0.28));
+      g.addColorStop(0, withAlpha(s.color, 0.22));
       g.addColorStop(1, withAlpha(s.color, 0));
       ctx.fillStyle = g; ctx.fill();
     }
@@ -149,7 +149,7 @@ export function scatterChart(canvas, points, opts = {}) {
   if (front.length > 1) {
     ctx.beginPath();
     front.forEach((p, i) => (i ? ctx.lineTo(px(p), py(p)) : ctx.moveTo(px(p), py(p))));
-    ctx.strokeStyle = withAlpha(C.green, 0.4);
+    ctx.strokeStyle = withAlpha(C.success, 0.4);
     ctx.lineWidth = 1.4;
     ctx.setLineDash([5, 4]);
     ctx.stroke();
@@ -162,24 +162,24 @@ export function scatterChart(canvas, points, opts = {}) {
     const r = isSel ? 7 : p.onFrontier ? 5 : 3.4;
     if (isSel || p.hovered) {
       ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
-      ctx.fillStyle = withAlpha(isSel ? '#ffffff' : C.cyan, 0.16); ctx.fill();
+      ctx.fillStyle = withAlpha(isSel ? C.gold : C.teal, 0.18); ctx.fill();
     }
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = isSel ? '#ffffff' : p.onFrontier ? C.green : withAlpha(C.muted, 0.55);
+    ctx.fillStyle = isSel ? C.gold : p.onFrontier ? C.teal : withAlpha(C.muted, 0.5);
     ctx.fill();
     if (p.onFrontier) {
-      ctx.strokeStyle = withAlpha('#04070b', 0.8); ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.4; ctx.stroke();
     }
   }
 
   // Current-plan marker, so the user can see where they stand on the frontier.
   if (opts.current) {
     const x = px(opts.current), y = py(opts.current);
-    ctx.strokeStyle = C.amber; ctx.lineWidth = 1.6;
+    ctx.strokeStyle = C.gold; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x - 13, y); ctx.lineTo(x - 9, y); ctx.moveTo(x + 9, y); ctx.lineTo(x + 13, y); ctx.stroke();
     ctx.font = '9px ui-monospace, monospace';
-    ctx.fillStyle = C.amber; ctx.textAlign = 'center';
+    ctx.fillStyle = C.gold; ctx.textAlign = 'center';
     ctx.fillText('LIVE', x, y - 14);
   }
 
@@ -210,7 +210,7 @@ export function stackBar(canvas, parts, opts = {}) {
     ctx.fillStyle = p.color;
     ctx.fillRect(x, 0, pw, h);
     if (pw > 34) {
-      ctx.fillStyle = 'rgba(4,8,12,.8)';
+      ctx.fillStyle = '#ffffff';
       ctx.font = '600 9px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(`${Math.round((p.value / total) * 100)}%`, x + pw / 2, h / 2 + 0.5);
@@ -229,9 +229,9 @@ export function gauge(canvas, value, opts = {}) {
   const start = Math.PI * 0.78, end = Math.PI * 2.22;
   ctx.lineCap = 'round';
   ctx.lineWidth = 6;
-  ctx.strokeStyle = 'rgba(255,255,255,.07)';
+  ctx.strokeStyle = 'rgba(18, 48, 64, .08)';
   ctx.beginPath(); ctx.arc(cx, cy, r, start, end); ctx.stroke();
-  ctx.strokeStyle = opts.color || C.green;
+  ctx.strokeStyle = opts.color || C.success;
   ctx.beginPath(); ctx.arc(cx, cy, r, start, start + (end - start) * clamp(value, 0, 1)); ctx.stroke();
   ctx.fillStyle = C.text;
   ctx.font = '600 17px ui-monospace, monospace';
@@ -256,13 +256,13 @@ export function sparkline(canvas, values, opts = {}) {
   const py = (v) => h - 2 - normalize(v, yr) * (h - 4);
   ctx.beginPath();
   values.forEach((v, i) => (i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(i), py(v))));
-  ctx.strokeStyle = opts.color || C.cyan;
+  ctx.strokeStyle = opts.color || C.teal;
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, withAlpha(opts.color || C.cyan, 0.22));
-  g.addColorStop(1, withAlpha(opts.color || C.cyan, 0));
+  g.addColorStop(0, withAlpha(opts.color || C.teal, 0.22));
+  g.addColorStop(1, withAlpha(opts.color || C.teal, 0));
   ctx.fillStyle = g; ctx.fill();
 }
 

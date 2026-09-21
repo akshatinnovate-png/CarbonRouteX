@@ -59,6 +59,67 @@ export const VEHICLE_TYPES = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Personal mobility                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Personal vehicle archetypes for PERSONAL mode.
+ *
+ * These are ordinary road vehicles, not fleet assets: no payload, no depot, no
+ * duty cycle. Consumption figures are per 100 km at a typical urban-mixed
+ * speed, and the emissions maths is the same well-to-wheel model the fleet
+ * uses — an electric car's CO2e still depends on the grid at the hour you
+ * drive, because that is true.
+ */
+export const PERSONAL_VEHICLES = {
+  CAR: {
+    key: 'CAR', label: 'Car', icon: 'car', energyType: 'petrol',
+    consumption: 7.4, unit: 'L/100km', avgSpeedFactor: 1.0, occupancy: 1.6,
+    costPerKm: 1.9, note: 'Petrol hatchback or sedan',
+  },
+  EV: {
+    key: 'EV', label: 'Electric car', icon: 'ev', energyType: 'bev',
+    consumption: 16.5, unit: 'kWh/100km', avgSpeedFactor: 1.0, occupancy: 1.6,
+    costPerKm: 1.1, note: 'Battery electric — grid intensity applies',
+  },
+  MOTORCYCLE: {
+    key: 'MOTORCYCLE', label: 'Motorcycle', icon: 'moto', energyType: 'petrol',
+    consumption: 3.1, unit: 'L/100km', avgSpeedFactor: 1.06, occupancy: 1.1,
+    costPerKm: 0.7, note: 'Filters through traffic; slightly faster in town',
+  },
+  BIKE: {
+    key: 'BIKE', label: 'Bicycle', icon: 'bike', energyType: 'human',
+    consumption: 0, unit: '—', avgSpeedFactor: 0.32, occupancy: 1,
+    costPerKm: 0, note: 'Zero tailpipe emissions; speed modelled on the road network',
+  },
+  OTHER: {
+    key: 'OTHER', label: 'Other', icon: 'grid', energyType: 'petrol',
+    consumption: 6.0, unit: 'L/100km', avgSpeedFactor: 1.0, occupancy: 1.5,
+    costPerKm: 1.6, note: 'Generic road vehicle — adjust consumption to match yours',
+  },
+};
+
+/**
+ * The four route choices offered in PERSONAL mode.
+ *
+ * Three of these are superlatives about one number, so they are decided by
+ * that number alone: an option labelled "Lowest emissions" that returned
+ * anything other than the lowest-emission road would be lying in its own
+ * title. Only BALANCED is a weighted trade-off, and it is the only one whose
+ * label admits to being one.
+ */
+export const PERSONAL_OPTIONS = [
+  { key: 'FASTEST', label: 'Fastest', blurb: 'Least time on the road',
+    metric: 'minutes' },
+  { key: 'CHEAPEST', label: 'Lowest cost', blurb: 'Least money spent getting there',
+    metric: 'cost' },
+  { key: 'GREENEST', label: 'Lowest emissions', blurb: 'Least CO\u2082e released',
+    metric: 'co2' },
+  { key: 'BALANCED', label: 'Balanced', blurb: 'A weighted trade-off across all four',
+    weights: { time: 0.32, cost: 0.24, emissions: 0.28, distance: 0.16 } },
+];
+
+/* ------------------------------------------------------------------ */
 /* Energy & emissions factors                                          */
 /* ------------------------------------------------------------------ */
 
@@ -66,12 +127,14 @@ export const ENERGY = {
   // Well-to-wheel CO2e intensity per unit of energy carrier.
   co2ePerUnit: {
     diesel: 3.17,  // kg CO2e per litre (combustion + upstream)
+    petrol: 2.86,  // kg CO2e per litre (combustion + upstream)
+    human: 0,      // a bicycle has no tailpipe and no fuel chain to account for
     cng: 2.98,     // kg CO2e per kg
     bev: 0.71,     // kg CO2e per kWh — grid intensity, see gridIntensity below
   },
   // Price per unit of energy carrier.
-  pricePerUnit: { diesel: 94.5, cng: 78.0, bev: 9.8 },
-  unitLabel: { diesel: 'L', cng: 'kg', bev: 'kWh' },
+  pricePerUnit: { diesel: 94.5, cng: 78.0, bev: 9.8, petrol: 106.0, human: 0 },
+  unitLabel: { diesel: 'L', cng: 'kg', bev: 'kWh', petrol: 'L', human: '' },
   /**
    * Grid carbon intensity by hour-of-day (kg CO2e / kWh). Solar-heavy midday.
    * Used only for BEV vehicles — this is what makes "when you drive" matter.
@@ -93,11 +156,11 @@ export const ENERGY = {
 /* ------------------------------------------------------------------ */
 
 export const OBJECTIVES = [
-  { key: 'time', label: 'Time', unit: 'min', accent: '#5ec8ff' },
-  { key: 'cost', label: 'Cost', unit: APP.currency, accent: '#ffc861' },
-  { key: 'emissions', label: 'Emissions', unit: 'kg', accent: '#3ee08f' },
-  { key: 'distance', label: 'Distance', unit: 'km', accent: '#b78bff' },
-  { key: 'reliability', label: 'Reliability', unit: '%', accent: '#ff7a93' },
+  { key: 'time', label: 'Time', unit: 'min', accent: '#0d8f8f' },
+  { key: 'cost', label: 'Cost', unit: APP.currency, accent: '#b08423' },
+  { key: 'emissions', label: 'Emissions', unit: 'kg', accent: '#0f8a6a' },
+  { key: 'distance', label: 'Distance', unit: 'km', accent: '#04434b' },
+  { key: 'reliability', label: 'Reliability', unit: '%', accent: '#c2742a' },
 ];
 
 export const PRESETS = {
@@ -124,11 +187,11 @@ export const OPTIMIZER = {
 
 export const TRAFFIC = {
   levels: [
-    { key: 'clear',  label: 'Clear',    mult: 0.86, color: '#3ee08f' },
-    { key: 'normal', label: 'Normal',   mult: 1.00, color: '#7fd4a8' },
-    { key: 'busy',   label: 'Busy',     mult: 1.22, color: '#ffc861' },
-    { key: 'heavy',  label: 'Heavy',    mult: 1.58, color: '#ff9a4d' },
-    { key: 'severe', label: 'Severe',   mult: 2.15, color: '#ff5f6d' },
+    { key: 'clear',  label: 'Clear',    mult: 0.86, color: '#14b8a6' },
+    { key: 'normal', label: 'Normal',   mult: 1.00, color: '#0d8f8f' },
+    { key: 'busy',   label: 'Busy',     mult: 1.22, color: '#d4a843' },
+    { key: 'heavy',  label: 'Heavy',    mult: 1.58, color: '#c2742a' },
+    { key: 'severe', label: 'Severe',   mult: 2.15, color: '#b4342f' },
   ],
   // Time-of-day demand curve driving the base congestion (index = hour).
   diurnal: [
@@ -162,8 +225,8 @@ export const LAYERS = [
 ];
 
 export const PRIORITY = {
-  critical: { key: 'critical', label: 'Critical', weight: 3.2, color: '#ff5f6d' },
-  high:     { key: 'high',     label: 'High',     weight: 2.0, color: '#ff9a4d' },
-  standard: { key: 'standard', label: 'Standard', weight: 1.0, color: '#5ec8ff' },
-  economy:  { key: 'economy',  label: 'Economy',  weight: 0.6, color: '#8a94a6' },
+  critical: { key: 'critical', label: 'Critical', weight: 3.2, color: '#b4342f' },
+  high:     { key: 'high',     label: 'High',     weight: 2.0, color: '#c2742a' },
+  standard: { key: 'standard', label: 'Standard', weight: 1.0, color: '#0d8f8f' },
+  economy:  { key: 'economy',  label: 'Economy',  weight: 0.6, color: '#8aa1ab' },
 };

@@ -1,18 +1,38 @@
 # CarbonRoute
 
-**An AI logistics command centre that plans a real delivery fleet over real roads, optimising time, cost and carbon at the same time.**
+### Optimize the Network. Not Just the Route.
+
+**Route intelligence over real satellite imagery and real roads, optimising time,
+cost and carbon at the same time — for one journey, or for an entire fleet.**
 
 No API keys. No build step. No dependencies. No backend. Open `index.html` behind
-any static server and you get a real map, real road routing, a constrained
-vehicle-routing optimiser, a digital twin and a carbon model — all running in the
-browser, with your data staying in your browser.
+any static server and you get real satellite imagery, real road routing, a
+constrained vehicle-routing optimiser, a digital twin and a carbon model — all
+running in the browser, with your data staying in your browser.
+
+CarbonRoute runs in one of **two modes**, chosen on first use and switchable at
+any time from Settings:
+
+| | **PERSONAL** | **LOGISTICS** |
+|---|---|---|
+| | Cars · Bikes · Trips | Fleets · Orders · Depots |
+| **The question** | Which road should I take? | How should the whole network run today? |
+| **Scope** | One person, one vehicle, one journey | Many vehicles, many orders, many depots |
+| **You compare** | Fastest · Lowest cost · Lowest emissions · Balanced | A Pareto frontier across five objectives |
+| **Tabs** | Journey, Garage, Settings | Map, Optimise, Simulation, Depots, Fleet, Orders, Analytics, Carbon, Events, Settings |
+
+The mode is a real fork, not a label: it changes the tab set, the optimiser that
+runs and the vocabulary. Both halves share the same physics — the same energy
+curve, the same well-to-wheel emission factors, the same hourly grid intensity —
+so "lowest emissions" means the same thing on both sides.
 
 ---
 
 ## Contents
 
 [What it does](#what-it-does) · [Real map, real roads](#real-map-real-roads) ·
-[Getting started](#getting-started) · [The tabs](#the-tabs) ·
+[Getting started](#getting-started) · [The two modes](#the-two-modes) ·
+[The tabs](#the-tabs) · [Brand and motion](#brand-and-motion) ·
 [Architecture](#architecture) · [Optimisation model](#optimisation-model) ·
 [Carbon model](#carbon-model) · [Data model](#data-model) ·
 [Performance](#performance) · [Accessibility](#accessibility) ·
@@ -50,11 +70,19 @@ you break the world on purpose, and re-solves.
 
 Nothing here is a simulation of geography.
 
-- **Basemap** — standard XYZ raster tiles from OpenStreetMap-based providers
-  (CARTO dark / light / Voyager, OSM standard, OpenTopoMap), drawn by a
-  hand-written slippy-map renderer in `src/render/tileMap.js`: Web Mercator
-  projection, LRU tile cache, in-flight de-duplication, and parent-tile upscaling
-  so zooming never flashes empty grey.
+- **Basemap** — real **satellite imagery** by default: Esri World Imagery as the
+  base, with transparent road-network and place-name layers composited on top.
+  A satellite base alone has no road names, and a road map alone has no ground
+  truth; that hybrid is what makes imagery usable for logistics rather than
+  merely pretty. Street-map styles (CARTO Light / Voyager / Dark, OpenTopoMap)
+  and your own tile server are also available in Settings.
+
+  All of it is drawn by a hand-written slippy-map renderer in
+  `src/render/tileMap.js`: Web Mercator projection, per-layer LRU tile cache,
+  in-flight de-duplication, and parent-tile upscaling so zooming never flashes
+  empty grey. Marks drawn over imagery carry halos and casings chosen from the
+  basemap in use (`onImagery()` in `src/render/palette.js`), because a route can
+  cross dark water and bright rooftops inside a single frame.
 - **Routing** — [OSRM](https://project-osrm.org/) over real OSM road geometry.
   The whole problem's travel times and distances arrive in **one** `/table`
   request; the drawn path for each route comes from `/route`.
@@ -81,21 +109,76 @@ python3 -m http.server 8000     # or: npx serve .
 Open <http://localhost:8000>. ES modules need an HTTP origin, so opening the file
 directly will not work.
 
-On first run you'll be walked through:
+On first run you land on the homepage, where the satellite map is already live —
+it is the same canvas the application uses, so signing in reframes a running
+network rather than loading one. Then you are asked one question:
+
+> ### What are you optimising?
+> **Personal mobility** — Cars · Bikes · Trips  
+> **Logistics operations** — Fleets · Orders · Depots
+
+**PERSONAL** then asks for three things, because three is all it needs:
 
 1. **Welcome** — a local sign-in (see [Data & privacy](#data--privacy)).
-2. **Region** — your operating city, which centres the map and biases address search.
+2. **Where you are** — centres the map and makes address search find the right place first.
+3. **Your vehicle** — car, electric car, motorcycle, bicycle or other, with your own consumption figure if you know it.
+
+**LOGISTICS** walks through the four things the fleet optimiser cannot run without:
+
+1. **Welcome** — the same local sign-in.
+2. **Region** — your operating city.
 3. **Depots** — at least one; routes start and end here.
 4. **Fleet** — vehicle type sets capacity, consumption, range and running cost.
 5. **Deliveries** — address, weight, priority and a time window.
 
-Every step is editable afterwards from the Depots, Fleet and Orders tabs. The
-wizard is a convenience, never the only path.
+Every step is editable afterwards from the Garage, or from the Depots, Fleet and
+Orders tabs. The wizard is a convenience, never the only path.
+
+## The two modes
+
+### PERSONAL — one journey, compared four ways
+
+Set a start and a destination. CarbonRoute asks the routing service for the road
+alternatives that genuinely exist between them, then costs each one through the
+same energy and emissions model the fleet uses:
+
+| Option | How it is decided |
+|---|---|
+| **Fastest** | The lowest-duration road, full stop |
+| **Lowest cost** | The lowest total of fuel/energy plus per-km running cost |
+| **Lowest emissions** | The lowest estimated CO₂e |
+| **Balanced** | A weighted trade-off across time, cost, emissions and distance |
+
+Three of those are superlatives about a single number, so they are decided by
+that number alone. An option labelled *Lowest emissions* that returned anything
+other than the lowest-emission road would be lying in its own title; only
+*Balanced* is a trade-off, and it is the only one whose label admits to being one.
+
+Every option shows **ETA, distance, energy, cost and CO₂e**, with the best value
+on each measure marked. When two options resolve to the same road — which happens
+often, and is a real finding about the journey — the card says *same road* rather
+than dressing one road up as four.
+
+An electric car is charged the **grid intensity of the hour it travels**, so the
+explanation can tell you that leaving at noon instead would be measurably cleaner
+for exactly the same distance.
+
+### LOGISTICS — the full command centre
+
+Depots, a vehicle register, an order book, capacity/range/time-window constrained
+routing, a Pareto frontier across five objectives, a digital twin with a what-if
+engine, and a carbon ledger. This is the mode the rest of this README describes.
 
 ## The tabs
 
 The interface is split by job, because an operations tool has several genuinely
 different ones and cramming them onto one screen made none of them comfortable.
+
+**PERSONAL mode** has three tabs — Journey, Garage and Settings — because a
+person planning their own commute has no depots, no order book and no dispatch,
+and offering those tabs greyed out would be worse than not offering them.
+
+**LOGISTICS mode** has ten, grouped by job:
 
 | Group | Tab | For |
 |---|---|---|
@@ -110,7 +193,35 @@ different ones and cramming them onto one screen made none of them comfortable.
 | | Events | Operational timeline and the alert centre |
 | **System** | Settings | Basemap, routing endpoints, account, import/export |
 
-Keys `1`–`9` jump between tabs; `O` optimises; `Space` plays the plan clock; `?` shows the rest.
+Number keys jump between whatever tabs the current mode actually has; `O`
+optimises (or opens the journey planner in PERSONAL); `Space` plays the plan
+clock; `?` shows the rest. Shortcuts are ignored while you are typing.
+
+## Brand and motion
+
+**White, teal and gold.** White carries the product. Teal means the system
+working — active states, primary actions, live routes. Gold is the colour of
+significance and is deliberately rare: the selected route, the winning number in
+a comparison, the optimised result. If gold were everywhere it would mean
+nothing. Deep navy appears only as type, as contrast, and over imagery. The
+tokens live in `styles/tokens.css` and are mirrored for canvas drawing in
+`src/render/palette.js`.
+
+**Every animation is declared in one place.** `src/ui/motion.js` exports the
+complete set of named primitives — `transitionToView`, `focusEntity`,
+`animateRouteChange`, `animateNetworkReplan`, `enterCommandCenter`,
+`exitCommandCenter`, `openPanel`, `closePanel`, `transitionMode`,
+`revealStagger`, `frameNetwork`, `pulseValue` — and views call those rather than
+writing their own keyframes. Two rules hold throughout:
+
+1. **Motion carries meaning or it does not happen.** A camera moving to the thing
+   you selected, a route redrawing, the network re-planning: each tells you
+   something. Decoration does not qualify.
+2. **Business logic is never inside an animation.** The optimiser, the store and
+   the engines do not know `motion.js` exists. Every primitive is safe to make a
+   no-op, which is exactly what `prefers-reduced-motion` does — it skips to the
+   end state rather than animating faster. The interface is designed to look
+   right with every animation disabled.
 
 ## Architecture
 
@@ -169,6 +280,7 @@ src/
 │   ├── emissions.js           carrier intensity, incl. hourly grid carbon
 │   ├── plan.js                route execution, constraints, objective function
 │   ├── optimizer.js           regret-2 insertion, annealing, validation, Pareto
+│   ├── personal.js            PERSONAL mode: one journey, four honest comparisons
 │   └── explain.js             every narrative in the product
 ├── render/
 │   ├── mercator.js            Web Mercator, haversine, polyline codec
@@ -176,9 +288,14 @@ src/
 │   ├── overlays.js            routes, stops, depots, vehicles, heatmap
 │   └── palette.js             single source of truth for colour
 ├── ui/
-│   ├── shell.js  onboarding.js  components.js  charts.js  icons.js
-│   └── pages/  map · optimize · simulation · depots · fleet · orders
-│                · analytics · carbon · events · settings
+│   ├── landing.js             the homepage and the PERSONAL/LOGISTICS chooser
+│   ├── motion.js              every animation in the product, as named primitives
+│   ├── shell.js               mode-aware tab set and page host
+│   ├── onboarding.js  components.js  charts.js  icons.js
+│   └── pages/  trip · garage                            (PERSONAL)
+│                map · optimize · simulation · depots · fleet · orders
+│                · analytics · carbon · events           (LOGISTICS)
+│                settings                                (both)
 ├── input/keyboard.js
 └── util/  math.js  format.js  dom.js
 ```
@@ -299,6 +416,21 @@ plan    = { id, label, createdAt, weights, routes, unserved,
             score, scoreBreakdown }
 ```
 
+PERSONAL mode adds a much smaller shape of its own:
+
+```js
+personal = { vehicleKey, vehicles: [{ id, key, label, consumption }],
+             origin, destination, departMinutes, optionKey, history }
+
+trip     = { id, at, from, to, departMinutes, vehicleKey,
+             trips:   [{ id, points, km, minutes, arriveMinutes, speedKmh,
+                         units, unitLabel, intensity, co2,
+                         energyCost, runningCost, cost, estimated, factors }],
+             options: [{ key, label, blurb, trip, score, sharedWith }],
+             best, worst, distinctRoutes, estimated,
+             chosen, drivers, versusFastest }
+```
+
 ## Performance
 
 - One `requestAnimationFrame` loop; the store's clock is advanced by it.
@@ -357,7 +489,7 @@ them — the public instances are rate-limited and offer no uptime guarantee.
 node tests/engines.test.mjs
 ```
 
-63 tests, no dependencies, fully offline (the routing client's transport is stubbed
+71 tests, no dependencies, fully offline (the routing client's transport is stubbed
 to exercise the documented fallback path).
 
 **Projection** — `project`/`unproject` round-trip, world-pixel round-trip at every
@@ -369,7 +501,8 @@ unreachable service degrades to a *labelled* estimate rather than an exception,
 over-limit stop counts reported rather than silently truncated.
 
 **Tile providers** — every provider yields a well-formed HTTPS URL with no
-unsubstituted tokens and credits OpenStreetMap; subdomains rotate.
+unsubstituted tokens and credits its actual source; subdomains rotate; the
+default basemap is real imagery and carries its road-and-label overlay.
 
 **Matrix & traffic** — rush hour costs more time than the small hours, a multiplier
 slows every leg, congestion costs *energy* as well as time, incidents are local
@@ -383,14 +516,24 @@ window-respecting, lateness detected, aggregation sums its routes exactly.
 twice and loses none, different weights produce different plans, empty fleet and
 empty order book handled, disabling a vehicle moves its work.
 
+**Personal trip engine** — a bicycle emits and costs nothing; the fastest road is
+not automatically the greenest, and neither is the shortest; one road in means one
+road out, flagged as the same road rather than dressed up as four; an electric car
+burns the same energy at noon and at 19:00 but emits more in the evening; a custom
+consumption figure scales the estimate linearly; comparison prose never dangles
+when nothing is worse; an unreachable routing service is reported, not disguised.
+
 **Explanation layer** — tested for *honesty*: every driver must cite a number, an
 identical plan must claim no change, **a strictly worse plan must be described as
 worse rather than spun**, `planDiff` reassignments verified against both plans,
 carbon attribution must sum to the reported total.
 
-The UI is verified in Chromium end to end — sign-in, the five-step wizard with live
-geocoding, the optimise run, and all ten tabs — against a local mock of the tile,
-routing and geocoding services, checking for zero page errors.
+The UI is verified in Chromium end to end — the landing page and its live map, the
+mode chooser, both onboarding paths with live geocoding, a PERSONAL journey
+compared four ways, switching modes from Settings, the LOGISTICS optimise run and
+all ten of its tabs, a 390 px phone viewport, and the whole thing again under
+`prefers-reduced-motion` — against a local mock of the tile, routing and geocoding
+services, checking for zero page errors and no horizontal overflow.
 
 ## Limitations
 
@@ -412,6 +555,14 @@ freight.
   regulations, no cross-docking, no pickup-and-delivery pairing.
 - **Time windows are single and soft.** No multi-window customers.
 - **Charging is not scheduled** — range is a constraint, not a mid-route activity.
+- **PERSONAL mode routes on the car network.** The public routing service models a
+  car. A bicycle's and a motorcycle's durations are scaled from that, not routed on
+  a cycle network, and the interface says so rather than implying otherwise.
+- **Road alternatives are whatever the service returns.** Often that is one road,
+  in which case all four options point at it and say *same road*. CarbonRoute will
+  not manufacture variety that does not exist.
+- **Satellite imagery is a basemap, not a data source.** Nothing is derived from the
+  pixels; roads, distances and durations all come from OpenStreetMap geometry.
 - **Sign-in is not authentication.** See below.
 
 ## Roadmap

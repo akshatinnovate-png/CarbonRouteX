@@ -13,7 +13,7 @@
 
 const KEY = 'carbonroute:workspace:v2';
 const SESSION_KEY = 'carbonroute:session:v2';
-const SCHEMA = 2;
+const SCHEMA = 3;
 
 export const storageAvailable = (() => {
   try {
@@ -31,12 +31,18 @@ export function emptyWorkspace() {
     schema: SCHEMA,
     account: null,           // { name, org, email, createdAt }
     onboarded: false,
+    /**
+     * PERSONAL or LOGISTICS. Null until the operator has chosen, because the
+     * choice genuinely changes which application they get, and guessing it
+     * would put someone in the wrong product.
+     */
+    mode: null,
     region: null,            // { label, lon, lat } — the operating city
     depots: [],
     vehicles: [],
     orders: [],
     settings: {
-      tileProvider: 'carto-dark',
+      tileProvider: 'satellite',
       customTileUrl: '',
       osrmEndpoint: '',      // blank = the public demo server
       geocodeEndpoint: '',   // blank = the public Nominatim instance
@@ -44,6 +50,16 @@ export function emptyWorkspace() {
       preset: 'balanced',
       weights: null,
       layers: null,
+    },
+    /** PERSONAL mode state: one person, their vehicles, their last journey. */
+    personal: {
+      vehicleKey: 'CAR',
+      vehicles: [],          // { id, label, key, consumption }
+      origin: null,          // { lon, lat, label, short }
+      destination: null,
+      departMinutes: null,   // null = leave now
+      optionKey: 'BALANCED',
+      history: [],           // recent journeys, newest first
     },
     counters: { vehicle: 0, order: 0, depot: 0 },
     updatedAt: null,
@@ -67,6 +83,7 @@ export function loadWorkspace() {
       ...parsed,
       settings: { ...base.settings, ...(parsed.settings || {}) },
       counters: { ...base.counters, ...(parsed.counters || {}) },
+      personal: { ...base.personal, ...(parsed.personal || {}) },
       depots: Array.isArray(parsed.depots) ? parsed.depots : [],
       vehicles: Array.isArray(parsed.vehicles) ? parsed.vehicles : [],
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],

@@ -1,103 +1,124 @@
 /* ==========================================================================
-   CarbonRoute X — Design tokens
-   Deep charcoal foundation, electric-green sustainability accent, restrained
-   cyan data accent. Every colour here has a job; none are decorative.
+   CarbonRoute — Design tokens
+   WHITE · TEAL · GOLD
+
+   White carries the product. Teal means movement, intelligence and
+   sustainability. Gold is rare: it marks optimisation, significance and
+   achievement. Deep navy appears only as type, as contrast, and over
+   satellite imagery — never as the primary surface.
    ========================================================================== */
 
 :root {
-  /* Surfaces — a cool slate ladder. Deliberately NOT black: near-black
-     reads as a toy console, while a lifted slate reads as instrumentation. */
-  --void:        #0d1420;
-  --deep:        #111a28;
-  --ink:         #152031;
-  --surface:     #1a2638;
-  --surface-2:   #202e43;
-  --raised:      #27374f;
+  /* --- Surfaces: warm white, never clinical grey ----------------------- */
+  --canvas:      #f7f9f9;   /* the page itself */
+  --surface:     #ffffff;   /* cards, panels */
+  --surface-2:   #f2f6f6;   /* insets, table headers */
+  --surface-3:   #e8eeee;   /* hover, subtle fills */
+  --ivory:       #fbfaf7;   /* warm secondary surface */
 
-  --line:        #2c3c54;
-  --line-soft:   #243246;
-  --line-strong: #3d5270;
+  --line:        #dde5e6;
+  --line-soft:   #eaf0f0;
+  --line-strong: #c2d0d2;
 
-  /* Type — higher contrast throughout; the old muted greys sat under 4.5:1. */
-  --text:        #f2f6fb;
-  --text-dim:    #c6d2e2;
-  --muted:       #a3b1c4;
-  --faint:       #7d8ca3;
+  /* --- Type: deep navy-charcoal, not black ----------------------------- */
+  --ink:         #0e2230;
+  --text:        #123040;
+  --text-dim:    #3d5a68;
+  --muted:       #5f7c88;
+  --faint:       #8aa1ab;
 
-  /* Accents */
-  --green:       #34d99a;
-  --green-deep:  #1f6f4a;
-  --cyan:        #62c8f8;
-  --cyan-deep:   #1d5878;
-  --amber:       #f5c661;
-  --orange:      #ff9a4d;
-  --red:         #ff5f6d;
-  --violet:      #b78bff;
-  --pink:        #ff7a93;
+  /* --- Teal: the brand's movement colour -------------------------------
+     A sophisticated blue-green, not a neon cyan. */
+  --teal:        #0d8f8f;
+  --teal-deep:   #07636a;
+  --teal-dark:   #04434b;
+  --teal-bright: #14b8a6;
+  --teal-soft:   #d3ecec;
+  --teal-wash:   #edf7f7;
 
-  /* Semantics */
-  --ok: var(--green);
-  --warn: var(--amber);
-  --bad: var(--red);
-  --info: var(--cyan);
+  /* --- Gold: metallic, restrained, earned ------------------------------
+     Desaturated toward bronze so it never reads as cheap yellow. */
+  --gold:        #b08423;
+  --gold-deep:   #8a6416;
+  --gold-bright: #d4a843;
+  --gold-soft:   #f4ead2;
+  --gold-wash:   #fbf6ea;
 
-  /* Glass */
-  --glass:       rgba(21, 32, 49, 0.88);
-  --glass-hi:    rgba(32, 46, 67, 0.86);
-  --glass-line:  rgba(122, 206, 255, 0.18);
-  --blur:        blur(18px) saturate(1.25);
+  /* --- Semantics -------------------------------------------------------- */
+  --success:     #0f8a6a;
+  --success-soft:#dcf0e8;
+  --warn:        #b08423;
+  --warn-soft:   #f4ead2;
+  --copper:      #c2742a;
+  --danger:      #b4342f;
+  --danger-soft: #f8e2e0;
+  --info:        var(--teal);
 
-  /* Elevation */
-  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
-  --shadow-2: 0 8px 28px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.03) inset;
-  --shadow-3: 0 24px 64px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.04) inset;
-  --glow-green: 0 0 0 1px rgba(62,224,143,.3), 0 0 24px rgba(62,224,143,.18);
-  --glow-cyan:  0 0 0 1px rgba(94,200,255,.3), 0 0 24px rgba(94,200,255,.16);
+  /* --- Dark contexts: satellite overlays, map chrome -------------------- */
+  --navy:        #0b1f2b;
+  --navy-2:      #113040;
+  --on-dark:     #eef5f6;
+  --on-dark-dim: #a9c2cb;
 
-  /* Geometry */
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
+  /* --- Glass over satellite imagery ------------------------------------ */
+  --glass:       rgba(255, 255, 255, 0.92);
+  --glass-thin:  rgba(255, 255, 255, 0.82);
+  --glass-line:  rgba(13, 143, 143, 0.18);
+  --blur:        blur(16px) saturate(1.15);
 
-  /* Rhythm */
+  /* --- Elevation: soft shadow, never glow ------------------------------- */
+  --shadow-1: 0 1px 2px rgba(14, 34, 48, .06), 0 1px 1px rgba(14, 34, 48, .04);
+  --shadow-2: 0 2px 4px rgba(14, 34, 48, .05), 0 8px 20px rgba(14, 34, 48, .07);
+  --shadow-3: 0 4px 8px rgba(14, 34, 48, .06), 0 20px 48px rgba(14, 34, 48, .12);
+  --shadow-map: 0 2px 6px rgba(9, 28, 40, .14), 0 12px 36px rgba(9, 28, 40, .18);
+  --ring-teal: 0 0 0 3px rgba(13, 143, 143, .16);
+  --ring-gold: 0 0 0 3px rgba(176, 132, 35, .18);
+
+  /* --- Geometry --------------------------------------------------------- */
+  --r-xs: 4px;  --r-sm: 7px;  --r-md: 11px;
+  --r-lg: 16px; --r-xl: 24px; --r-pill: 999px;
+
+  /* --- Rhythm ----------------------------------------------------------- */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
-  --sp-5: 20px; --sp-6: 28px; --sp-7: 40px;
+  --sp-5: 22px; --sp-6: 32px; --sp-7: 48px; --sp-8: 72px;
 
-  --rail-left: 312px;
-  --rail-right: 336px;
-  --topbar-h: 56px;
-  --dock-h: 300px;
+  --rail-right: 344px;
+  --topbar-h: 60px;
 
-  /* Type stacks — system fonts only, so the app works fully offline. */
+  /* --- Type ------------------------------------------------------------- */
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
                Inter, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono",
                Menlo, Consolas, monospace;
 
-  --ease: cubic-bezier(.22,.61,.36,1);
-  --ease-out: cubic-bezier(.16,1,.3,1);
-  --dur-1: 120ms;
-  --dur-2: 220ms;
-  --dur-3: 420ms;
+  /* --- Motion ----------------------------------------------------------- */
+  --ease:      cubic-bezier(.22,.61,.36,1);
+  --ease-out:  cubic-bezier(.16,1,.3,1);
+  --ease-in-out: cubic-bezier(.65,0,.35,1);
+  --dur-1: 140ms;
+  --dur-2: 260ms;
+  --dur-3: 460ms;
+  --dur-4: 780ms;
+  --dur-cinematic: 1400ms;
 }
 
-/* High-contrast accommodation: strengthen every border and lift the text. */
 @media (prefers-contrast: more) {
   :root {
-    --text: #ffffff;
-    --muted: #c3ccd8;
-    --faint: #98a3b2;
-    --line: #3a4a5e;
-    --line-strong: #56697f;
-    --glass: rgba(10, 15, 22, 0.96);
-    --glass-line: rgba(140, 210, 255, 0.35);
+    --text: #06161f;
+    --muted: #2f4a56;
+    --faint: #4d6874;
+    --line: #a8bcc0;
+    --line-strong: #7d979e;
+    --teal: #056b6b;
+    --gold: #7d5c10;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --dur-1: 1ms; --dur-2: 1ms; --dur-3: 1ms; }
+  :root {
+    --dur-1: 1ms; --dur-2: 1ms; --dur-3: 1ms;
+    --dur-4: 1ms; --dur-cinematic: 1ms;
+  }
   *, *::before, *::after {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
@@ -110,14 +131,19 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Several components below set `display` on elements the application also
+   toggles with the `hidden` attribute, and a class selector outranks the user
+   agent's `[hidden]` rule. Stating it once here keeps `hidden` meaning hidden. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
-  background: var(--void);
+  background: var(--canvas);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overscroll-behavior: none;
@@ -127,53 +153,45 @@ body { overflow: hidden; }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: none; padding: 0; }
-a { color: var(--cyan); text-decoration: none; }
+a { color: var(--teal-deep); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 :focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--teal);
   outline-offset: 2px;
   border-radius: var(--r-xs);
 }
 :focus:not(:focus-visible) { outline: none; }
 
-::selection { background: rgba(62,224,143,.28); }
+::selection { background: var(--teal-soft); color: var(--ink); }
 
-/* Scrollbars that belong to this interface rather than the OS. */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
-  background: var(--line-strong); border-radius: 99px;
-  border: 2px solid transparent; background-clip: content-box;
+  background: var(--line-strong); border-radius: var(--r-pill);
+  border: 3px solid transparent; background-clip: content-box;
 }
-*::-webkit-scrollbar-thumb:hover { background: #3c4d61; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
 
 /* ------------------------------------------------------- type utilities */
 
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.015em; }
 
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--faint);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--faint);
 }
-
 .label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--muted);
 }
 
 .dim { color: var(--muted); }
 .faint { color: var(--faint); }
-.up { color: var(--green); }
-.down { color: var(--red); }
+.teal { color: var(--teal); }
+.gold { color: var(--gold); }
 .nowrap { white-space: nowrap; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -183,12 +201,11 @@ a:hover { text-decoration: underline; }
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* A skip link that is invisible until focused. */
 .skip-link {
   position: absolute; top: -60px; left: var(--sp-3); z-index: 999;
-  background: var(--raised); color: var(--text);
+  background: var(--surface); color: var(--text);
   padding: var(--sp-2) var(--sp-4); border-radius: var(--r-sm);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow-2);
   transition: top var(--dur-2) var(--ease);
 }
 .skip-link:focus { top: var(--sp-3); }

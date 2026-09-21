@@ -181,6 +181,59 @@ export class OsrmService {
     return task;
   }
 
+  /**
+   * Several genuinely different road routes between two points.
+   *
+   * OSRM returns alternatives only when they exist and are meaningfully
+   * distinct, so this can legitimately come back with one route: two points a
+   * kilometre apart on a single arterial have one sensible path, and inventing
+   * three would be a lie. Callers must handle a short list.
+   */
+  async routeAlternatives(points, { alternatives = 3 } = {}) {
+    if (points.length < 2) return [];
+    const key = points.map((p) => `${round6(p.lon)},${round6(p.lat)}`).join(';');
+    const cacheKey = `alt:${alternatives}:${key}`;
+    const cached = this.routeCache.get(cacheKey);
+    if (cached) { this.stats.cacheHits++; return cached; }
+    if (this.inFlight.has(cacheKey)) return this.inFlight.get(cacheKey);
+
+    const url = `${this.endpoint}/route/v1/${this.profile}/${key}`
+      + `?alternatives=${alternatives}&overview=full&geometries=polyline6&steps=false`;
+
+    const task = (async () => {
+      try {
+        this.stats.routeRequests++;
+        const json = await this._fetch(url);
+        const routes = (json.routes || []).map((r, i) => ({
+          id: `alt-${i}`,
+          points: decodePolyline(r.geometry, 6),
+          km: r.distance / 1000,
+          minutes: r.duration / 60,
+          estimated: false,
+        }));
+        if (!routes.length) throw new Error('routing service returned no route');
+        this.routeCache.set(cacheKey, routes);
+        return routes;
+      } catch {
+        // One clearly-flagged straight-line estimate, never a fabricated set
+        // of "alternatives" that do not exist.
+        const km = straightLineKm(points);
+        return [{
+          id: 'alt-0',
+          points: points.slice(),
+          km,
+          minutes: (km / ASSUMED_SPEED_KMH) * 60,
+          estimated: true,
+        }];
+      } finally {
+        this.inFlight.delete(cacheKey);
+      }
+    })();
+
+    this.inFlight.set(cacheKey, task);
+    return task;
+  }
+
   /** Cheap liveness probe used by Settings and the setup wizard. */
   async probe() {
     try {

@@ -34,6 +34,10 @@ export const ICON = {
   info: svg('<circle cx="8" cy="8" r="6.2"/><path d="M8 7.4v4"/><circle cx="8" cy="5" r=".7" fill="currentColor" stroke="none"/>'),
   grid: svg('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
   map: svg('<path d="M1.8 4.2 6 2.5v9.3l-4.2 1.7z"/><path d="M6 2.5 10 4.2v9.3L6 11.8z"/><path d="m10 4.2 4.2-1.7v9.3L10 13.5z"/>'),
+  car: svg('<path d="M2.2 10.5V8.2l1.5-3.3a1 1 0 0 1 .9-.6h6.8a1 1 0 0 1 .9.6l1.5 3.3v2.3"/><path d="M2.2 8.6h11.6"/><circle cx="4.8" cy="10.8" r="1.3"/><circle cx="11.2" cy="10.8" r="1.3"/>'),
+  ev: svg('<path d="M2.2 10.5V8.2l1.5-3.3a1 1 0 0 1 .9-.6h6.8a1 1 0 0 1 .9.6l1.5 3.3v2.3"/><path d="M2.2 8.6h11.6"/><circle cx="4.8" cy="10.8" r="1.3"/><circle cx="11.2" cy="10.8" r="1.3"/><path d="M8.6 4.6 7 7.1h2L7.4 9.4" stroke-width="1.2"/>'),
+  bike: svg('<circle cx="4" cy="11" r="2.7"/><circle cx="12" cy="11" r="2.7"/><path d="M4 11l2.6-5h3.1l2.3 5M6 6h3.2M9.7 6l1.4 2.6"/>'),
+  moto: svg('<circle cx="3.6" cy="11" r="2.5"/><circle cx="12.4" cy="11" r="2.5"/><path d="M3.6 11h3.2l2.6-3.4h2.2l1 3.4M6.6 7.6h2.6M10.6 4.4h1.9"/>'),
 };
 
 export const icon = (name, size) => {

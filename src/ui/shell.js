@@ -27,8 +27,19 @@ import { carbonPage } from './pages/carbon.js';
 import { simulationPage } from './pages/simulation.js';
 import { eventsPage } from './pages/events.js';
 import { settingsPage } from './pages/settings.js';
+import { tripPage } from './pages/trip.js';
+import { garagePage } from './pages/garage.js';
+import { transitionToView, transitionMode } from './motion.js';
 
-export const TABS = [
+/**
+ * The tab set is a function of the mode, not a filter applied to one list.
+ *
+ * PERSONAL is not LOGISTICS with panels hidden: somebody planning their own
+ * commute has no depots, no order book and no dispatch, and offering those
+ * tabs greyed out would be worse than not offering them. The two lists are
+ * separate because the two products are.
+ */
+export const LOGISTICS_TABS = [
   { key: 'map', label: 'Map', icon: 'map', build: mapPage, group: 'operate' },
   { key: 'optimize', label: 'Optimise', icon: 'bolt', build: optimizePage, group: 'operate' },
   { key: 'simulation', label: 'Simulation', icon: 'sim', build: simulationPage, group: 'operate' },
@@ -41,40 +52,59 @@ export const TABS = [
   { key: 'settings', label: 'Settings', icon: 'layers', build: settingsPage, group: 'system' },
 ];
 
+export const PERSONAL_TABS = [
+  { key: 'trip', label: 'Journey', icon: 'route', build: tripPage, group: 'operate' },
+  { key: 'garage', label: 'Garage', icon: 'fleet', build: garagePage, group: 'manage' },
+  { key: 'settings', label: 'Settings', icon: 'layers', build: settingsPage, group: 'system' },
+];
+
+export const tabsFor = (mode) => (mode === 'PERSONAL' ? PERSONAL_TABS : LOGISTICS_TABS);
+
+/** Kept for callers that only need the full logistics set. */
+export const TABS = LOGISTICS_TABS;
+
 export function initShell(store, map) {
   const tabsHost = document.getElementById('tabbar');
   const pagesHost = document.getElementById('pages');
-  const built = new Map();
-  const buttons = new Map();
+  const canvas = document.getElementById('map-canvas');
+
+  let tabs = tabsFor(store.mode);
+  let built = new Map();
+  let buttons = new Map();
   let active = null;
 
-  for (const tab of TABS) {
-    const badge = el('span.tab-badge', { hidden: true });
-    const btn = el('button.tab', {
-      type: 'button', role: 'tab', id: `tab-${tab.key}`,
-      'aria-selected': 'false', 'aria-controls': `page-${tab.key}`,
-      dataset: { group: tab.group, tab: tab.key },
-      onclick: () => show(tab.key),
-      onkeydown: (e) => {
-        const i = TABS.findIndex((t) => t.key === tab.key);
-        if (e.key === 'ArrowRight') { e.preventDefault(); show(TABS[(i + 1) % TABS.length].key, true); }
-        if (e.key === 'ArrowLeft') { e.preventDefault(); show(TABS[(i - 1 + TABS.length) % TABS.length].key, true); }
+  function buildTabBar() {
+    buttons = new Map();
+    mount(tabsHost);
+    for (const tab of tabs) {
+      const badge = el('span.tab-badge', { hidden: true });
+      const btn = el('button.tab', {
+        type: 'button', role: 'tab', id: `tab-${tab.key}`,
+        'aria-selected': 'false', 'aria-controls': `page-${tab.key}`,
+        dataset: { group: tab.group, tab: tab.key },
+        onclick: () => show(tab.key),
+        onkeydown: (e) => {
+          const i = tabs.findIndex((t) => t.key === tab.key);
+          if (e.key === 'ArrowRight') { e.preventDefault(); show(tabs[(i + 1) % tabs.length].key, true); }
+          if (e.key === 'ArrowLeft') { e.preventDefault(); show(tabs[(i - 1 + tabs.length) % tabs.length].key, true); }
+        },
       },
-    },
-    el('span.tab-icon', { html: icon(tab.icon, 15) }),
-    el('span.tab-label', { text: tab.label }),
-    badge);
-    buttons.set(tab.key, { btn, badge });
-    tabsHost.append(btn);
+      el('span.tab-icon', { html: icon(tab.icon, 15) }),
+      el('span.tab-label', { text: tab.label }),
+      badge);
+      buttons.set(tab.key, { btn, badge });
+      tabsHost.append(btn);
+    }
   }
 
   function show(key, focus = false) {
-    if (!TABS.some((t) => t.key === key)) key = 'map';
+    if (!tabs.some((t) => t.key === key)) key = tabs[0].key;
+    const from = active;
     active = key;
     for (const [k, { btn }] of buttons) btn.setAttribute('aria-selected', String(k === key));
 
     if (!built.has(key)) {
-      const spec = TABS.find((t) => t.key === key);
+      const spec = tabs.find((t) => t.key === key);
       const node = el('div.page-host', {
         id: `page-${key}`, role: 'tabpanel', 'aria-labelledby': `tab-${key}`, tabindex: '0',
       }, spec.build(store, map));
@@ -83,15 +113,46 @@ export function initShell(store, map) {
     }
     for (const [k, node] of built) node.dataset.active = String(k === key);
 
+    // One canvas serves every map-bearing page; whichever page is showing
+    // takes it, so the tile cache and drawing context survive tab changes.
+    const page = built.get(key);
+    page.firstElementChild?.adoptCanvas?.();
+
+    // Tabs are angles on one network, so the change is a lift, not a load.
+    const direction = tabs.findIndex((t) => t.key === key) >= tabs.findIndex((t) => t.key === from) ? 1 : -1;
+    transitionToView(from && from !== key ? built.get(from) : null, page, { direction });
+
     // The map canvas is only correctly sized once its host is visible.
-    if (key === 'map') requestAnimationFrame(() => { map.resize(); map.invalidate(); });
+    if (key === 'map' || key === 'trip') requestAnimationFrame(() => { map.resize(); map.invalidate(); });
     if (focus) buttons.get(key).btn.focus();
     store.setView(key);
     try { history.replaceState(null, '', `#${key}`); } catch { /* file:// has no history */ }
-    announce(`${TABS.find((t) => t.key === key).label} view`);
+    announce(`${tabs.find((t) => t.key === key).label} view`);
+  }
+
+  /**
+   * Rebuild for a new mode.
+   *
+   * Pages are discarded rather than hidden: a stale Orders page subscribed to
+   * the bus would keep rendering a fleet that PERSONAL mode is not showing.
+   * The canvas is rescued first, because it is a singleton the next mode needs.
+   */
+  function applyMode() {
+    tabs = tabsFor(store.mode);
+    if (canvas && canvas.parentElement && canvas.parentElement !== document.body) {
+      document.body.append(canvas);
+    }
+    for (const node of built.values()) node.remove();
+    built = new Map();
+    active = null;
+    buildTabBar();
+    show(tabs[0].key);
+    transitionMode(pagesHost, { to: store.mode });
+    updateBadges();
   }
 
   const updateBadges = raf1(() => {
+    if (store.isPersonal) return;
     const alerts = store.activeAlerts().length;
     setBadge('events', alerts, store.activeAlerts().some((a) => a.severity === 'high') ? 'alert' : 'info');
     const unserved = store.plan?.metrics.unserved ?? 0;
@@ -113,12 +174,14 @@ export function initShell(store, map) {
   on(EV.PLAN_CHANGED, updateBadges);
   on(EV.SCENARIO_CHANGED, updateBadges);
   on(EV.ENTITIES_CHANGED, updateBadges);
+  on(EV.MODE_CHANGED, applyMode);
 
+  buildTabBar();
   const initial = (location.hash || '').replace('#', '');
-  show(TABS.some((t) => t.key === initial) ? initial : 'map');
+  show(tabs.some((t) => t.key === initial) ? initial : tabs[0].key);
   updateBadges();
 
-  return { show, get active() { return active; } };
+  return { show, applyMode, get active() { return active; }, get tabs() { return tabs; } };
 }
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +194,31 @@ export function initTopbar(store, shell) {
   const accountEl = document.getElementById('account-chip');
   const serviceEl = document.getElementById('service-chip');
   const speedHost = document.getElementById('speed-control');
+  const brandSub = document.querySelector('.brand-sub');
+
+  /**
+   * The plan clock and its speed control belong to a published fleet schedule.
+   * PERSONAL mode has no schedule to advance, so rather than show a dead
+   * control they are removed from the header entirely.
+   */
+  let lastMode = null;
+  const applyModeChrome = () => {
+    const personal = store.isPersonal;
+    clockEl.hidden = personal;
+    speedHost.hidden = personal;
+    if (brandSub) setText(brandSub, personal ? 'Personal Mobility' : 'Logistics Intelligence');
+    // The status readout describes the mode it was written in, so carrying
+    // "3 road options" across into the fleet view would be nonsense.
+    if (store.mode && store.mode !== lastMode) {
+      lastMode = store.mode;
+      setStatus('idle', personal ? 'Ready to plan' : 'System nominal');
+    }
+  };
+  on(EV.MODE_CHANGED, applyModeChrome);
+  // The landing page sets the mode silently (it has its own transition), so
+  // the header also follows the coarse state event rather than relying on
+  // MODE_CHANGED alone.
+  on(EV.STATE_CHANGED, applyModeChrome);
 
   const SPEEDS = [
     { v: 0, label: '‖', title: 'Pause the operations clock' },
@@ -150,6 +238,7 @@ export function initTopbar(store, shell) {
   })));
 
   const renderClock = raf1(() => {
+    if (store.isPersonal) return;
     setText(clockEl.querySelector('.t'), clock(store.clockMinutes));
     setText(clockEl.querySelector('.d'), store.playing ? 'PLAN CLOCK' : 'PAUSED');
     for (const b of speedHost.querySelectorAll('button')) {
@@ -197,6 +286,12 @@ export function initTopbar(store, shell) {
           : p.phase === 'pareto' ? `Frontier ${p.done}/${p.total}`
             : p.message || 'Analysing');
   });
+  on(EV.TRIP_CHANGED, (trip) => {
+    if (!store.isPersonal) return;
+    if (store.tripPending) { setStatus('working', 'Finding routes'); return; }
+    if (store.tripError) { setStatus('alert', 'Routing unavailable'); return; }
+    setStatus('idle', trip ? `${trip.distinctRoutes} road option${trip.distinctRoutes === 1 ? '' : 's'}` : 'Ready');
+  });
   on(EV.OPT_DONE, () => {
     const high = store.activeAlerts().filter((a) => a.severity === 'high').length;
     setStatus(high ? 'alert' : 'idle', high ? `${high} high alert${high > 1 ? 's' : ''}` : 'Plan optimal');
@@ -208,8 +303,8 @@ export function initTopbar(store, shell) {
     setStatus(high ? 'alert' : 'idle', high ? `${high} high alert${high > 1 ? 's' : ''}` : 'System nominal');
   });
 
-  renderClock(); renderAccount(); renderService();
-  return { setStatus };
+  renderClock(); renderAccount(); renderService(); applyModeChrome();
+  return { setStatus, applyModeChrome };
 }
 
 const initials = (name) => (name || '?')

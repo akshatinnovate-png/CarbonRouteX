@@ -46,7 +46,7 @@ export function ordersPage(store, map) {
       render: (o) => {
         if (o.etaMinutes == null) return '—';
         const slack = o.deadline - o.etaMinutes;
-        return el('span', { style: { color: slack < 0 ? 'var(--red)' : slack < 30 ? 'var(--amber)' : undefined } },
+        return el('span', { style: { color: slack < 0 ? 'var(--danger)' : slack < 30 ? 'var(--gold-deep)' : undefined } },
           dur(slack));
       },
       cmp: (a, b) => (a.deadline - (a.etaMinutes ?? 0)) - (b.deadline - (b.etaMinutes ?? 0)),

@@ -1,0 +1,444 @@
+/* ==========================================================================
+   Brand surfaces — landing, mode chooser, personal journey, garage
+
+   These are the screens somebody meets before they meet the product, so the
+   rules are stricter here than anywhere else: white dominates, type carries
+   the page, gold appears once or twice, and the only thing that moves is the
+   live map.
+   ========================================================================== */
+
+/* ------------------------------------------------------------- landing */
+
+.landing-host {
+  position: fixed; inset: 0; z-index: 210;
+  overflow-y: auto; overflow-x: hidden;
+  background:
+    radial-gradient(62% 48% at 8% -6%, var(--teal-wash) 0%, transparent 58%),
+    radial-gradient(52% 44% at 102% 8%, var(--gold-wash) 0%, transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, var(--canvas) 62%, #ffffff 100%);
+}
+
+.landing {
+  min-height: 100dvh;
+  display: flex; flex-direction: column;
+  padding: var(--sp-5) clamp(var(--sp-4), 5vw, var(--sp-8)) var(--sp-6);
+  gap: var(--sp-7);
+}
+
+.landing-bar { display: flex; align-items: center; gap: var(--sp-3); }
+.landing-bar .spacer { flex: 1; }
+.landing-brand { display: flex; align-items: center; gap: 11px; }
+.landing-mark { width: 34px; height: 34px; display: block; }
+.landing-mark svg { width: 100%; height: 100%; }
+.landing-brand strong {
+  display: block; font-size: 15px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink);
+}
+.landing-brand small {
+  display: block; font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--faint); font-family: var(--font-mono);
+}
+.landing-version {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em;
+  color: var(--faint);
+}
+
+/* --- hero ------------------------------------------------------------- */
+
+.landing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  gap: clamp(var(--sp-5), 4vw, var(--sp-8));
+  align-items: center;
+  flex: 1;
+}
+
+.landing-copy { max-width: 42rem; }
+
+.landing-eyebrow {
+  margin: 0 0 var(--sp-4);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .24em;
+  text-transform: uppercase; color: var(--teal-deep);
+  display: flex; align-items: center; gap: 10px;
+}
+.landing-eyebrow::after {
+  content: ''; height: 1px; flex: 1; max-width: 90px;
+  background: linear-gradient(90deg, var(--teal-soft), transparent);
+}
+
+.landing-title {
+  margin: 0 0 var(--sp-4);
+  font-size: clamp(38px, 5.6vw, 68px);
+  line-height: 1.02;
+  letter-spacing: -.035em;
+  font-weight: 640;
+  color: var(--ink);
+}
+.landing-title span { display: block; }
+/* The second line is the promise, so it is the one thing that is gold. */
+.landing-title .gold-line {
+  background: linear-gradient(96deg, var(--gold-deep) 0%, var(--gold) 42%, var(--gold-bright) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+@supports not (background-clip: text) {
+  .landing-title .gold-line { color: var(--gold-deep); }
+}
+
+.landing-lede {
+  margin: 0 0 var(--sp-6);
+  font-size: clamp(15px, 1.35vw, 17.5px);
+  line-height: 1.62; color: var(--text-dim);
+  max-width: 54ch;
+}
+
+.landing-cta { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.landing-link { font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line-strong); }
+.landing-link:hover { color: var(--teal-deep); border-bottom-color: var(--teal); text-decoration: none; }
+
+/* --- the live map in the hero ---------------------------------------- */
+
+.landing-map-frame { position: relative; min-width: 0; }
+.landing-map {
+  position: relative;
+  aspect-ratio: 4 / 3.1;
+  width: 100%;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background: var(--navy);
+  border: 1px solid rgba(255, 255, 255, .7);
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(14, 34, 48, .05);
+}
+/* The canvas is moved in here by the landing page itself. */
+.landing-map > #map-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  opacity: 1; pointer-events: none;
+}
+/* A soft white vignette so the imagery joins the page instead of fighting it. */
+.landing-map-scrim {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 50%, transparent 42%, rgba(255, 255, 255, .28) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, transparent 28%);
+}
+.landing-map-caption {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: var(--sp-3);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.dot-live {
+  width: 7px; height: 7px; border-radius: 99px; background: var(--teal);
+  box-shadow: 0 0 0 3px rgba(13, 143, 143, .16);
+  animation: pip-breathe 2.4s var(--ease) infinite;
+}
+
+/* --- facts ------------------------------------------------------------ */
+
+.landing-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
+  gap: var(--sp-5);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--line);
+}
+.landing-fact h3 { margin: var(--sp-3) 0 5px; font-size: 13.5px; font-weight: 620; color: var(--ink); }
+.landing-fact p { margin: 0; font-size: 12.5px; line-height: 1.62; color: var(--muted); }
+.lf-icon {
+  display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--teal-wash); color: var(--teal-deep);
+  border: 1px solid var(--teal-soft);
+}
+
+.landing-foot { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
+.landing-foot p { margin: 0; font-size: 11.5px; color: var(--faint); max-width: 74ch; }
+
+@media (max-width: 960px) {
+  .landing-hero { grid-template-columns: 1fr; }
+  .landing-map-frame { order: -1; }
+  .landing-map { aspect-ratio: 16 / 10; }
+}
+
+/* -------------------------------------------------------- mode chooser */
+
+.landing--choose { justify-content: flex-start; }
+
+.mode-shell {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  display: flex; flex-direction: column; gap: var(--sp-6);
+  padding-top: var(--sp-5);
+}
+.mode-head { text-align: center; max-width: 60ch; margin: 0 auto; }
+.mode-head .landing-eyebrow { justify-content: center; }
+.mode-head .landing-eyebrow::after { display: none; }
+.mode-head h1 {
+  margin: 0 0 var(--sp-3);
+  font-size: clamp(30px, 4vw, 46px); letter-spacing: -.03em;
+  line-height: 1.08; text-wrap: balance;
+  font-weight: 640; color: var(--ink);
+}
+.mode-lede { margin: 0; font-size: 14.5px; line-height: 1.65; color: var(--muted); }
+
+.mode-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: var(--sp-5);
+}
+
+.mode-card {
+  position: relative;
+  text-align: left;
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-5) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  transition: transform var(--dur-2) var(--ease-out),
+              box-shadow var(--dur-2) var(--ease-out),
+              border-color var(--dur-2);
+}
+/* A hairline of colour at the top edge, and nothing else: the difference
+   between the two modes is stated in words, not signalled with gradients. */
+.mode-card::before {
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--teal), var(--teal-bright));
+  transform: scaleX(0); transform-origin: left;
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.mode-card[data-mode="LOGISTICS"]::before {
+  background: linear-gradient(90deg, var(--gold-deep), var(--gold-bright));
+}
+.mode-card:hover, .mode-card:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-3);
+  border-color: var(--line-strong);
+}
+.mode-card:hover::before, .mode-card:focus-visible::before { transform: scaleX(1); }
+.mode-card[data-chosen="true"] { border-color: var(--gold); box-shadow: var(--ring-gold), var(--shadow-3); }
+.mode-card[data-chosen="true"]::before { transform: scaleX(1); }
+
+.mc-top { display: flex; align-items: center; justify-content: space-between; }
+.mc-badge {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .2em;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  background: var(--teal-wash); color: var(--teal-deep); border: 1px solid var(--teal-soft);
+}
+.mode-card[data-mode="LOGISTICS"] .mc-badge {
+  background: var(--gold-wash); color: var(--gold-deep); border-color: var(--gold-soft);
+}
+.mc-arrow { color: var(--faint); display: flex; transition: transform var(--dur-2) var(--ease-out), color var(--dur-2); }
+.mode-card:hover .mc-arrow { transform: translateX(4px); color: var(--teal); }
+.mode-card[data-mode="LOGISTICS"]:hover .mc-arrow { color: var(--gold); }
+
+.mode-card h2 { margin: 0; font-size: 24px; letter-spacing: -.02em; font-weight: 620; color: var(--ink); }
+.mc-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.mc-tags span {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+  padding: 2px 8px; border-radius: var(--r-pill); background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.mode-card > p { margin: 0; font-size: 13px; line-height: 1.62; color: var(--text-dim); }
+.mc-points { list-style: none; margin: auto 0 0; padding: var(--sp-3) 0 0; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line-soft); }
+.mc-points li { display: grid; grid-template-columns: 15px 1fr; gap: 9px; font-size: 12px; color: var(--muted); }
+.mc-points li > span:first-child { color: var(--teal); display: flex; margin-top: 2px; }
+.mode-card[data-mode="LOGISTICS"] .mc-points li > span:first-child { color: var(--gold); }
+
+.mode-foot { text-align: center; margin: 0; font-size: 11.5px; color: var(--faint); }
+
+/* ------------------------------------------------- mode switch (settings) */
+
+.mode-switch { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); }
+.mode-switch-card {
+  text-align: left; display: flex; flex-direction: column; gap: 4px;
+  padding: var(--sp-4);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface);
+  transition: border-color var(--dur-1), box-shadow var(--dur-1);
+}
+.mode-switch-card:hover:not(:disabled) { border-color: var(--teal); box-shadow: var(--ring-teal); }
+.mode-switch-card[aria-pressed="true"] { border-color: var(--gold); background: var(--gold-wash); }
+.mode-switch-card:disabled { cursor: default; }
+.msc-badge {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em; color: var(--muted);
+}
+.mode-switch-card strong { font-size: 14px; color: var(--ink); }
+.mode-switch-card small { font-size: 10.5px; color: var(--muted); font-family: var(--font-mono); letter-spacing: .06em; }
+.mode-switch-card p { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); }
+
+/* ========================================================================
+   PERSONAL mode — the journey page
+   ======================================================================== */
+
+.trip-page {
+  position: absolute; inset: 0;
+  display: grid;
+  /* minmax(0, …) on both tracks: without it a long address or a wide button
+     inside the panel sets a min-content floor and pushes the grid wider than
+     the viewport, which is invisible on a desktop and obvious on a phone. */
+  grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
+  min-height: 0;
+  background: var(--navy);
+}
+
+.trip-panel {
+  background: var(--canvas);
+  border-right: 1px solid var(--line);
+  overflow-y: auto; overflow-x: hidden;
+  min-height: 0; min-width: 0;
+  z-index: 3;
+}
+.trip-panel-inner { padding: var(--sp-5) var(--sp-4) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.trip-head h1 { margin: 6px 0 6px; font-size: 24px; letter-spacing: -.025em; font-weight: 620; color: var(--ink); }
+.trip-head p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+
+.trip-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.trip-field { display: flex; flex-direction: column; gap: 7px; }
+
+/* --- start / destination --------------------------------------------- */
+
+.trip-endpoints { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
+.trip-endpoint { display: grid; grid-template-columns: 16px 1fr; gap: 11px; align-items: start; }
+.trip-endpoint-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* The connector between the two dots: the shape of a journey, drawn once. */
+.trip-dot {
+  position: relative; margin-top: 22px;
+  width: 13px; height: 13px; border-radius: 99px;
+  border: 3px solid var(--teal); background: var(--surface);
+}
+.trip-dot[data-kind="end"] { border-color: var(--gold); background: var(--gold); }
+.trip-endpoint:first-child .trip-dot::after {
+  content: ''; position: absolute; left: 50%; top: 15px;
+  width: 2px; height: calc(100% + 60px);
+  transform: translateX(-50%);
+  background: repeating-linear-gradient(180deg, var(--line-strong) 0 3px, transparent 3px 7px);
+}
+.trip-swap { align-self: flex-end; margin-top: -4px; }
+
+/* --- vehicle picker --------------------------------------------------- */
+
+.vehicle-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.vehicle-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--text-dim);
+  font-size: 11.5px;
+  transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1), box-shadow var(--dur-1);
+}
+.vehicle-chip:hover { border-color: var(--teal); color: var(--teal-deep); }
+.vehicle-chip[aria-checked="true"] {
+  border-color: var(--teal); background: var(--teal); color: #ffffff;
+  box-shadow: 0 1px 2px rgba(7, 99, 106, .22);
+}
+.vc-icon { display: flex; }
+.vc-note { display: none; }
+
+.vehicle-picker--lg { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-3); }
+.vehicle-picker--lg .vehicle-chip {
+  flex-direction: column; align-items: flex-start; gap: 5px;
+  border-radius: var(--r-md); padding: var(--sp-4);
+}
+.vehicle-picker--lg .vc-label { font-size: 14px; font-weight: 600; }
+.vehicle-picker--lg .vc-note { display: block; font-size: 11.5px; line-height: 1.5; opacity: .82; }
+
+/* --- route options ---------------------------------------------------- */
+
+.trip-loading { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4) 0; }
+.trip-loading p { margin: 0; font-size: 12px; }
+
+.route-options { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.route-option {
+  text-align: left;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface);
+  transition: border-color var(--dur-1), box-shadow var(--dur-1), background var(--dur-1);
+}
+.route-option:hover { border-color: var(--line-strong); box-shadow: var(--shadow-1); }
+/* The chosen route is the one the map is drawing in gold. They must agree. */
+.route-option[data-selected="true"] {
+  border-color: var(--gold); background: var(--gold-wash); box-shadow: var(--ring-gold);
+}
+/* Another option that resolved to the same road: stated, not celebrated. */
+.route-option[data-sameroad="true"] { border-left: 3px solid var(--gold-soft); }
+.ro-head { display: flex; align-items: baseline; gap: 8px; }
+.ro-head .spacer { flex: 1; }
+.ro-head strong { font-size: 14px; color: var(--ink); letter-spacing: -.01em; }
+.ro-time {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.route-option[data-selected="true"] .ro-time { color: var(--gold-deep); }
+.ro-blurb { margin: 0; font-size: 11.5px; color: var(--muted); }
+.ro-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
+.ro-metric { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ro-metric .k {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--faint);
+}
+.ro-metric .v {
+  display: flex; align-items: baseline; gap: 3px;
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ro-metric .v small { font-size: 8.5px; color: var(--faint); }
+/* Best-in-set on a measure. Gold, sparingly, and only when it is true. */
+.ro-metric[data-best="true"] .v { color: var(--gold-deep); font-weight: 650; }
+.ro-metric[data-best="true"] .k { color: var(--gold); }
+
+/* Four figures in a row, not a wrapped block: the strip is a readout. */
+.trip-hero { flex-wrap: nowrap; }
+.trip-hero:empty { display: none; }
+
+@media (max-width: 1100px) {
+  .trip-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .trip-panel {
+    grid-row: 2;
+    border-right: none; border-top: 1px solid var(--line);
+    max-height: 56dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: 0 -8px 28px rgba(14, 34, 48, .12);
+  }
+  /* On a phone the panel is a sheet, so it gets a grab handle. */
+  .trip-panel-inner { padding-top: var(--sp-4); }
+  .trip-panel::before {
+    content: ''; display: block; width: 38px; height: 4px; border-radius: 99px;
+    background: var(--line-strong); margin: 9px auto 0;
+  }
+  .ro-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 9px; }
+}
+
+@media (max-width: 560px) {
+  /* On a phone the label is a luxury the row cannot afford; the icon and the
+     accessible name carry it instead. */
+  .lookup-row .btn span { display: none; }
+  .lookup-row .btn { padding: 0 11px; }
+  .trip-panel-inner { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+}
+
+/* ---------------------------------------------------------- garage */
+
+.type-card {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: var(--sp-4);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); box-shadow: var(--shadow-1);
+}
+.type-card[aria-current="true"] { border-color: var(--gold); background: var(--gold-wash); }
+.type-card strong { font-size: 14px; color: var(--ink); }
+.type-card p { margin: 0; font-size: 11.5px; line-height: 1.5; }
+.type-card .kv { margin-top: 2px; }
+.tc-icon {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 7px; background: var(--teal-wash); color: var(--teal-deep);
+  border: 1px solid var(--teal-soft);
+}
+.type-card .btn { margin-top: auto; }

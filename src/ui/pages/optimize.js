@@ -143,7 +143,7 @@ export function optimizePage(store, map) {
     const round = (w) => Object.fromEntries(Object.entries(w || {}).map(([k, v]) => [k, Math.round(v * 100)]));
     const dirty = store.plan && JSON.stringify(round(store.plan.weights)) !== JSON.stringify(round(store.weights));
     setText(node, dirty ? 'CHANGED — RE-RUN' : '');
-    node.style.color = dirty ? 'var(--amber)' : 'var(--faint)';
+    node.style.color = dirty ? 'var(--gold-deep)' : 'var(--faint)';
   }
 
   /* --------------------------------------------------- plan card */
@@ -167,8 +167,8 @@ export function optimizePage(store, map) {
           ...kv('Stops planned', `${num(m.stops)} of ${num(m.stops + m.unserved)}`),
           ...kv('Capacity utilisation', pct(m.utilization, 0)),
           ...kv('On-time rate', pct(m.onTimeRate, 1)),
-          ...kv('Unserved', num(m.unserved), m.unserved ? 'var(--red)' : undefined),
-          ...kv('Objective score', plan.score != null ? num(plan.score, 3) : '—', 'var(--green)')),
+          ...kv('Unserved', num(m.unserved), m.unserved ? 'var(--danger)' : undefined),
+          ...kv('Objective score', plan.score != null ? num(plan.score, 3) : '—', 'var(--success)')),
         s ? el('p.basis', {
           text: `Solved in ${num(s.elapsedMs)} ms over ${num(s.iterations)} search iterations, `
             + `${num(s.routeEvaluations)} route evaluations against a ${s.matrixSize}×${s.matrixSize} road matrix`
@@ -182,8 +182,8 @@ export function optimizePage(store, map) {
     const history = store.optimizeHistory || [];
     const canvas = el('canvas', { 'aria-hidden': 'true' });
     requestAnimationFrame(() => lineChart(canvas, [
-      { points: history.map((h) => ({ x: h.iteration, y: h.score })), color: C.cyan, width: 1.2 },
-      { points: history.map((h) => ({ x: h.iteration, y: h.best })), color: C.green, width: 2, fill: true },
+      { points: history.map((h) => ({ x: h.iteration, y: h.score })), color: C.teal, width: 1.2 },
+      { points: history.map((h) => ({ x: h.iteration, y: h.best })), color: C.success, width: 2, fill: true },
     ], {
       height: 190, xLabel: 'Search iteration', yLabel: 'Objective score',
       yFormat: (v) => v.toFixed(2), xFormat: (v) => num(v, 0),
@@ -193,8 +193,8 @@ export function optimizePage(store, map) {
     return card('Optimiser convergence', el('span.eyebrow', { text: 'SIMULATED ANNEALING' }),
       el('div.chart-wrap', null, canvas),
       el('div.chart-legend', null,
-        el('span', null, el('i', { style: { background: C.cyan } }), 'Accepted state'),
-        el('span', null, el('i', { style: { background: C.green } }), 'Best found')),
+        el('span', null, el('i', { style: { background: C.teal } }), 'Accepted state'),
+        el('span', null, el('i', { style: { background: C.success } }), 'Best found')),
       el('p.basis', {
         text: 'The search accepts worsening states early to escape local optima, then tightens. '
           + 'The green line is the best feasible plan found — the one that was published.',
@@ -258,9 +258,9 @@ export function optimizePage(store, map) {
         el('div.stack-sm', null,
           el('div.chart-wrap', null, canvas),
           el('div.chart-legend', null,
-            el('span', null, el('i', { style: { background: C.green } }), `Non-dominated here (${front2d.size})`),
+            el('span', null, el('i', { style: { background: C.success } }), `Non-dominated here (${front2d.size})`),
             el('span', null, el('i', { style: { background: C.muted } }), `Dominated (${data.candidates.length - front2d.size})`),
-            el('span', null, el('i', { style: { background: C.amber } }), 'Live plan')),
+            el('span', null, el('i', { style: { background: C.gold } }), 'Live plan')),
           el('p.basis', {
             text: `${data.candidates.length} weight vectors were sampled and optimised independently on the same road matrix. `
               + `A point is highlighted when nothing beats it on both displayed axes. Across cost, time and CO₂e together, `
@@ -284,7 +284,7 @@ export function optimizePage(store, map) {
         ...kv('Fleet time', dur(c.metrics.minutes)),
         ...kv('Distance', fkm(c.metrics.km, 0)),
         ...kv('Vehicles', num(c.metrics.vehiclesUsed)),
-        ...kv('Unserved', num(c.metrics.unserved), c.metrics.unserved ? 'var(--red)' : undefined)),
+        ...kv('Unserved', num(c.metrics.unserved), c.metrics.unserved ? 'var(--danger)' : undefined)),
       cmp && !isLive ? el('div.explain', null,
         el('div.why-title', { text: 'Adopting this solution' }),
         el('p', { text: cmp.verdict }),

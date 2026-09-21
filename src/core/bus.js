@@ -42,6 +42,8 @@ export const EV = {
   WEIGHTS_CHANGED: 'weights:changed',
   TOAST: 'toast',
   VIEW_CHANGED: 'view:changed',          // the active tab
+  MODE_CHANGED: 'mode:changed',          // PERSONAL <-> LOGISTICS
+  TRIP_CHANGED: 'trip:changed',          // PERSONAL mode journey recomputed
   ENTITIES_CHANGED: 'entities:changed',  // depots/vehicles/orders added or edited
   MATRIX_CHANGED: 'matrix:changed',      // the road matrix was re-fetched
   SERVICE_STATUS: 'service:status',      // routing/geocoding reachability

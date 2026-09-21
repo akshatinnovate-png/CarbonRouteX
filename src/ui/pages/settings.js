@@ -19,10 +19,47 @@ export function settingsPage(store, map) {
   const render = raf1(() => {
     mount(root, page('Settings', 'Basemap, routing service, workspace data and account.',
       el('div.stack', null,
+        modeCard(),
         el('div.grid-2', null, basemapCard(), routingCard()),
         el('div.grid-2', null, accountCard(), dataCard()),
         aboutCard())));
   });
+
+  /* --------------------------------------------------------- mode */
+
+  /**
+   * Switching mode is not destructive: the fleet workspace and the personal
+   * garage are stored separately, so going one way and back leaves both
+   * exactly as they were.
+   */
+  function modeCard() {
+    const MODES = [
+      { key: 'PERSONAL', label: 'Personal mobility', sub: 'Cars · Bikes · Trips',
+        blurb: 'One person, one vehicle, one journey compared four ways.' },
+      { key: 'LOGISTICS', label: 'Logistics operations', sub: 'Fleets · Orders · Depots',
+        blurb: 'Depots, an order book, constrained routing and scenario simulation.' },
+    ];
+    return card('Mode',
+      chip(store.mode || 'unset', store.mode === 'PERSONAL' ? '' : 'gold'),
+      el('div.mode-switch', null, ...MODES.map((m) => el('button.mode-switch-card', {
+        type: 'button',
+        'aria-pressed': String(store.mode === m.key),
+        disabled: store.mode === m.key,
+        onclick: () => {
+          store.setMode(m.key);
+          announce(`${m.label} mode`);
+          render();
+        },
+      },
+      el('span.msc-badge', { text: m.key }),
+      el('strong', { text: m.label }),
+      el('small', { text: m.sub }),
+      el('p', { text: m.blurb })))),
+      el('p.basis', {
+        text: 'Your fleet workspace and your personal garage are stored separately. '
+          + 'Switching between modes never discards either.',
+      }));
+  }
 
   /* ------------------------------------------------------ basemap */
 
@@ -92,8 +129,8 @@ export function settingsPage(store, map) {
           ...kv('Table requests', num(store.osrm.stats.tableRequests)),
           ...kv('Route requests', num(store.osrm.stats.routeRequests)),
           ...kv('Geometry cache hits', num(store.osrm.stats.cacheHits)),
-          ...kv('Failures', num(store.osrm.stats.failures), store.osrm.stats.failures ? 'var(--amber)' : undefined)),
-        status.message ? el('p.basis', { style: { color: 'var(--amber)' }, text: status.message }) : null,
+          ...kv('Failures', num(store.osrm.stats.failures), store.osrm.stats.failures ? 'var(--gold-deep)' : undefined)),
+        status.message ? el('p.basis', { style: { color: 'var(--gold-deep)' }, text: status.message }) : null,
         field('OSRM endpoint', endpoint, {
           hint: 'Leave blank to use the free public demo server. Point this at your own OSRM instance for production volumes.',
         }),

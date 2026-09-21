@@ -4,8 +4,13 @@
  * Boot order:
  *   1. Load the local workspace and start the services.
  *   2. Bring up the real map immediately, so there is never a blank screen.
- *   3. If this is a first run, show sign-in and the setup wizard.
+ *   3. On a first run, show the landing page and the mode chooser, then the
+ *      setup wizard for whichever mode was chosen.
  *   4. Otherwise mount the shell, fit the map to the network, and optimise.
+ *
+ * The map is created before any of that and never torn down: the landing hero,
+ * the fleet map and the personal journey view all adopt the same canvas, so the
+ * network is live from the first frame and stays live across every transition.
  */
 
 import { APP } from './config.js';
@@ -16,6 +21,8 @@ import { makeProvider, customProvider, DEFAULT_PROVIDER } from './services/tiles
 import { installOverlays } from './render/overlays.js';
 import { initShell, initTopbar } from './ui/shell.js';
 import { initOnboarding } from './ui/onboarding.js';
+import { initLanding } from './ui/landing.js';
+import { enterCommandCenter, animateNetworkReplan } from './ui/motion.js';
 import { initKeyboard } from './input/keyboard.js';
 import { el, mount, announce } from './util/dom.js';
 import { icon } from './ui/icons.js';
@@ -48,7 +55,7 @@ async function boot() {
 
   // The map is a view: it must repaint whenever anything it draws changes.
   for (const evt of [EV.PLAN_CHANGED, EV.ENTITIES_CHANGED, EV.SELECT, EV.HOVER,
-    EV.LAYERS_CHANGED, EV.SCENARIO_CHANGED, EV.ORDERS_CHANGED]) {
+    EV.LAYERS_CHANGED, EV.SCENARIO_CHANGED, EV.ORDERS_CHANGED, EV.TRIP_CHANGED, EV.MODE_CHANGED]) {
     on(evt, () => map.invalidate());
   }
   // The store owns the clock; the map loop is what advances it.
@@ -73,30 +80,65 @@ async function boot() {
   initKeyboard(store, { map, shell, help: initHelp() });
   on(EV.VIEW_CHANGED, (key) => { if (shell.active !== key) shell.show(key); });
 
-  /* ----------------------------------------------------- onboarding */
+  /* --------------------------------------------- landing & onboarding */
+
+  const appEl = document.getElementById('app');
+
+  const enter = () => enterCommandCenter({
+    overlay: null,
+    app: appEl,
+    topbar: document.querySelector('.topbar'),
+    tabbar: document.getElementById('tabbar'),
+    page: document.getElementById('pages'),
+  });
 
   const onboarding = initOnboarding(store, {
     onComplete: async () => {
-      shell.show('map');
+      shell.applyMode();
+      await enter();
+      if (store.isPersonal) {
+        const r = store.workspace.region;
+        if (r) map.setView(r.lon, r.lat, r.zoom || 13);
+        announce('Ready to plan a journey');
+        return;
+      }
       fitEverything(map, store);
       await store.optimizeFleet({ trigger: 'First plan', label: 'Optimised plan' });
+      await animateNetworkReplan(map);
       fitRoutes(map, store);
     },
   });
 
-  if (!store.signedIn || !store.onboarded) {
+  const landing = initLanding(store, {
+    onChoose: () => {
+      shell.applyMode();
+      onboarding.show();
+    },
+  });
+
+  if (!store.mode) {
+    // The map keeps running behind the landing page — the hero adopts this
+    // very canvas, so entering the application is a reframing, not a load.
+    landing.show();
+  } else if (!store.signedIn || !store.onboarded) {
     onboarding.show();
   } else {
-    document.getElementById('app').removeAttribute('aria-hidden');
-    fitEverything(map, store);
-    if (store.depots.length && store.vehicles.length && store.openOrders().length) {
-      await store.optimizeFleet({ trigger: 'Session start', label: 'Optimised plan' });
-      fitRoutes(map, store);
+    await enter();
+    if (store.isPersonal) {
+      const r = store.workspace.region;
+      if (r) map.setView(r.lon, r.lat, r.zoom || 13, { animate: false });
+      announce('Ready to plan a journey');
+    } else {
+      fitEverything(map, store);
+      if (store.depots.length && store.vehicles.length && store.openOrders().length) {
+        await store.optimizeFleet({ trigger: 'Session start', label: 'Optimised plan' });
+        fitRoutes(map, store);
+      }
+      announce('Command centre ready');
     }
-    announce('Command centre ready');
   }
 
-  window.CarbonRoute = { store, map, shell, version: APP.version };
+  window.CarbonRoute = { store, map, shell, landing, onboarding, version: APP.version };
 }
 
 /* ------------------------------------------------------------------ */

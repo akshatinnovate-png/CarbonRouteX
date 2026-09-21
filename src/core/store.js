@@ -22,12 +22,19 @@ import { NetworkMatrix } from '../engines/matrix.js';
 import { PlanEngine, normaliseWeights } from '../engines/plan.js';
 import { Optimizer } from '../engines/optimizer.js';
 import { explainReplan, explainRoute, comparePlans } from '../engines/explain.js';
+import { buildTripOptions, explainTrip, compareTrips } from '../engines/personal.js';
 import { clamp } from '../util/math.js';
 import { clock, clockSeconds, dur, kg, num, pct } from '../util/format.js';
 import { haversineKm, pointAtFraction, polylineKm } from '../render/mercator.js';
 
 let uid = 0;
 const nextId = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}${(uid++).toString(36)}`;
+
+/** Wall-clock minutes since midnight — what "leave now" means. */
+const nowMinutes = () => {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+};
 
 export class Store {
   constructor() {
@@ -53,6 +60,11 @@ export class Store {
     this.optimizing = false;
     this.optimizeProgress = null;
     this.pareto = null;
+
+    /** PERSONAL mode: the last computed journey, or null. */
+    this.trip = null;
+    this.tripPending = false;
+    this.tripError = null;
 
     this.clockMinutes = SIM.dayStartMinutes;
     this.speedMultiplier = 0;
@@ -126,6 +138,10 @@ export class Store {
   get orders() { return this.workspace.orders; }
   get settings() { return this.workspace.settings; }
   get onboarded() { return !!this.workspace.onboarded; }
+  get mode() { return this.workspace.mode || null; }
+  get personal() { return this.workspace.personal; }
+  get isPersonal() { return this.mode === 'PERSONAL'; }
+  get isLogistics() { return this.mode === 'LOGISTICS'; }
   get signedIn() { return !!this.session; }
 
   reindex() {
@@ -208,7 +224,7 @@ export class Store {
     clearSession();
     this.workspace = emptyWorkspace();
     this.session = null;
-    this.plan = null; this.baseline = null; this.pareto = null;
+    this.plan = null; this.baseline = null; this.pareto = null; this.trip = null;
     this.alerts = []; this.log = [];
     this.reindex();
     emit(EV.STATE_CHANGED, this);
@@ -220,7 +236,7 @@ export class Store {
     const ws = importWorkspace(text);
     this.workspace = ws;
     this.reindex();
-    this.plan = null; this.baseline = null; this.pareto = null;
+    this.plan = null; this.baseline = null; this.pareto = null; this.trip = null;
     this.persist();
     this.logEvent('system', `Workspace imported — ${ws.depots.length} depots, ${ws.vehicles.length} vehicles, ${ws.orders.length} orders`);
     emit(EV.ENTITIES_CHANGED, { kind: 'import' });
@@ -713,6 +729,176 @@ export class Store {
     if (this.hover.kind === kind && this.hover.id === id) return;
     this.hover = { kind, id };
     emit(EV.HOVER, this.hover);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Mode                                                              */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Choose between PERSONAL and LOGISTICS.
+   *
+   * This is not cosmetic. The tab set, the map contents, the optimiser that
+   * runs and the vocabulary all follow from it, which is why it is persisted
+   * with the workspace and why it can be changed at any time from Settings
+   * without losing either side's data.
+   */
+  setMode(mode, { silent = false } = {}) {
+    const next = mode === 'PERSONAL' ? 'PERSONAL' : 'LOGISTICS';
+    if (this.workspace.mode === next) return next;
+    this.workspace.mode = next;
+    this.persist();
+    this.logEvent('system', next === 'PERSONAL'
+      ? 'Switched to Personal mobility'
+      : 'Switched to Logistics operations');
+    if (!silent) emit(EV.MODE_CHANGED, next);
+    emit(EV.STATE_CHANGED, this);
+    return next;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Personal mode                                                     */
+  /* ---------------------------------------------------------------- */
+
+  setPersonal(patch) {
+    Object.assign(this.workspace.personal, patch);
+    this.persist();
+    emit(EV.STATE_CHANGED, this);
+  }
+
+  addPersonalVehicle({ key = 'CAR', label, consumption } = {}) {
+    const v = {
+      id: nextId('PV'),
+      key,
+      label: (label || '').trim() || `My ${(key || 'car').toLowerCase()}`,
+      consumption: Number.isFinite(consumption) ? consumption : undefined,
+    };
+    this.workspace.personal.vehicles.push(v);
+    this.workspace.personal.vehicleKey = key;
+    this.persist();
+    emit(EV.ENTITIES_CHANGED, { kind: 'personal-vehicle', id: v.id });
+    return v;
+  }
+
+  removePersonalVehicle(id) {
+    const p = this.workspace.personal;
+    p.vehicles = p.vehicles.filter((v) => v.id !== id);
+    this.persist();
+    emit(EV.ENTITIES_CHANGED, { kind: 'personal-vehicle', id });
+  }
+
+  /**
+   * Plan one journey.
+   *
+   * The road alternatives are real: they come from the routing service over
+   * OpenStreetMap geometry. Everything layered on top of them — energy, cost,
+   * CO2e — is an estimate from published factors, and is labelled as such
+   * wherever it is shown.
+   */
+  async planTrip({ origin, destination, vehicleKey, departMinutes, optionKey } = {}) {
+    const p = this.workspace.personal;
+    const from = origin || p.origin;
+    const to = destination || p.destination;
+    if (!from || !to) {
+      this.tripError = 'Choose where you are starting from and where you are going.';
+      emit(EV.TRIP_CHANGED, null);
+      return null;
+    }
+
+    Object.assign(p, {
+      origin: from,
+      destination: to,
+      vehicleKey: vehicleKey || p.vehicleKey || 'CAR',
+      departMinutes: departMinutes ?? p.departMinutes,
+      optionKey: optionKey || p.optionKey || 'BALANCED',
+    });
+    this.persist();
+
+    this.tripPending = true;
+    this.tripError = null;
+    emit(EV.TRIP_CHANGED, null);
+
+    // Two points that resolve to the same place is a real mistake somebody can
+    // make with an address search, and "0 min over 0.0 km" is not a useful
+    // answer to it.
+    if (haversineKm(from.lon, from.lat, to.lon, to.lat) < 0.03) {
+      this.tripPending = false;
+      this.tripError = 'The start and the destination are the same place. Choose a different destination.';
+      emit(EV.TRIP_CHANGED, null);
+      return null;
+    }
+
+    const depart = Number.isFinite(p.departMinutes) ? p.departMinutes : nowMinutes();
+    const custom = p.vehicles.find((v) => v.key === p.vehicleKey && Number.isFinite(v.consumption));
+
+    try {
+      const alts = await this.osrm.routeAlternatives(
+        [{ lon: from.lon, lat: from.lat }, { lon: to.lon, lat: to.lat }],
+      );
+      const set = buildTripOptions(alts, {
+        vehicleKey: p.vehicleKey,
+        departMinutes: depart,
+        consumption: custom?.consumption,
+      });
+      const chosen = set.options.find((o) => o.key === p.optionKey) || set.options[0] || null;
+      const fastest = set.options.find((o) => o.key === 'FASTEST') || null;
+
+      this.trip = {
+        id: nextId('TRIP'),
+        at: Date.now(),
+        from,
+        to,
+        departMinutes: depart,
+        vehicleKey: p.vehicleKey,
+        ...set,
+        chosen,
+        drivers: chosen ? explainTrip(chosen, set) : [],
+        versusFastest: chosen && fastest && chosen.trip.id !== fastest.trip.id
+          ? compareTrips(chosen.trip, fastest.trip, { labelA: chosen.label, labelB: 'the fastest route' })
+          : null,
+      };
+      this.tripPending = false;
+
+      p.history = [
+        { at: this.trip.at, from: from.short || from.label, to: to.short || to.label,
+          km: chosen?.trip.km ?? null, co2: chosen?.trip.co2 ?? null, option: chosen?.key ?? null },
+        ...p.history,
+      ].slice(0, 12);
+      this.persist();
+
+      this.logEvent('plan', `Journey planned — ${from.short || 'start'} to ${to.short || 'destination'}`);
+      emit(EV.TRIP_CHANGED, this.trip);
+      return this.trip;
+    } catch (err) {
+      this.tripPending = false;
+      this.tripError = err?.message || 'The routing service could not be reached.';
+      this.logEvent('error', `Journey could not be planned — ${this.tripError}`);
+      emit(EV.TRIP_CHANGED, null);
+      return null;
+    }
+  }
+
+  /** Pick a different one of the four options without re-routing. */
+  selectTripOption(key) {
+    if (!this.trip) return null;
+    const chosen = this.trip.options.find((o) => o.key === key);
+    if (!chosen) return null;
+    const fastest = this.trip.options.find((o) => o.key === 'FASTEST') || null;
+    this.trip.chosen = chosen;
+    this.trip.drivers = explainTrip(chosen, this.trip);
+    this.trip.versusFastest = fastest && chosen.trip.id !== fastest.trip.id
+      ? compareTrips(chosen.trip, fastest.trip, { labelA: chosen.label, labelB: 'the fastest route' })
+      : null;
+    this.workspace.personal.optionKey = key;
+    this.persist();
+    emit(EV.TRIP_CHANGED, this.trip);
+    return chosen;
+  }
+
+  clearTrip() {
+    this.trip = null;
+    this.tripError = null;
+    emit(EV.TRIP_CHANGED, null);
   }
 
   setView(view) {

@@ -11,14 +11,22 @@
  */
 
 import { RENDER } from '../config.js';
-import { C, withAlpha, vehicleColor, PRIORITY_COLOR, STATUS_COLOR } from './palette.js';
+import {
+  C, withAlpha, vehicleColor, onImagery, PRIORITY_COLOR, STATUS_COLOR, CARBON_RAMP,
+} from './palette.js';
 import { haversineKm } from './mercator.js';
 import { clamp } from '../util/math.js';
 
 const frac = (v) => v - Math.floor(v);
 
 export function installOverlays(map, store) {
-  const isDark = () => (map.provider?.theme ?? 'dark') === 'dark';
+  /**
+   * Satellite imagery is an unpredictable background: one route can cross dark
+   * water, bright rooftops and pale desert inside a single frame. Rather than
+   * pick a colour and hope, every mark is drawn against a contrast pair chosen
+   * from the basemap in use.
+   */
+  const ink = () => onImagery(map.provider?.theme ?? 'imagery');
   const on = (key) => !!store.layers[key];
 
   /* ---------------------------------------------------------- routes */
@@ -41,13 +49,13 @@ export function installOverlays(map, store) {
           focused,
           dimmed: anyFocus && !focused,
           index: store.vehicles.findIndex((v) => v.id === r.vehicleId),
-          dark: isDark(),
+          ik: ink(),
         });
       }
     }
   });
 
-  function drawRoute(ctx, view, route, { focused, dimmed, index, dark }) {
+  function drawRoute(ctx, view, route, { focused, dimmed, index, ik }) {
     const path = route.path && route.path.length > 1
       ? route.path
       : routeWaypoints(route, store);
@@ -62,19 +70,43 @@ export function installOverlays(map, store) {
     }
     if (!visible) return;
 
-    const colour = focused ? (dark ? '#ffffff' : '#0b1626') : vehicleColor(index < 0 ? 0 : index);
+    // The selected route is gold. Everything else is a member of the teal
+    // fleet ramp: one system, distinguishable members.
+    const colour = focused ? C.gold : vehicleColor(index < 0 ? 0 : index);
+    // A route the motion layer has just flagged as changed: see
+    // animateRouteChange() in ui/motion.js. Presentation only — the plan is
+    // already published and readable in the tables before this runs.
+    const flagged = map.highlight?.ids?.has(route.id)
+      ? clamp((map.highlight.until - performance.now()) / map.highlight.duration, 0, 1)
+      : 0;
     const w = clamp(view.zoom - 7, 1, 5) * view.dpr;
-    const alpha = dimmed ? 0.18 : focused ? 1 : 0.8;
+    const alpha = dimmed ? 0.2 : focused ? 1 : 0.82;
 
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // A dark casing keeps the line readable over busy cartography.
+    // A casing keeps the line readable over busy cartography and over imagery.
     trace(ctx, pts);
-    ctx.strokeStyle = dark ? 'rgba(6,11,18,.55)' : 'rgba(255,255,255,.7)';
-    ctx.lineWidth = w * (focused ? 3.4 : 2.6);
+    ctx.strokeStyle = ik.dark ? 'rgba(6,22,32,.5)' : 'rgba(255,255,255,.78)';
+    ctx.lineWidth = w * (focused ? 3.6 : 2.7);
     ctx.stroke();
+
+    if (flagged > 0) {
+      trace(ctx, pts);
+      ctx.strokeStyle = withAlpha(C.goldBright, 0.55 * flagged);
+      ctx.lineWidth = w * (3 + 5 * flagged);
+      ctx.stroke();
+    }
+
+    if (focused) {
+      // A second, softer gold halo: the selected route should be findable at a
+      // glance without being the only thing you can see.
+      trace(ctx, pts);
+      ctx.strokeStyle = withAlpha(C.goldBright, 0.3);
+      ctx.lineWidth = w * 5.2;
+      ctx.stroke();
+    }
 
     trace(ctx, pts);
     ctx.strokeStyle = withAlpha(colour, alpha);
@@ -87,7 +119,7 @@ export function installOverlays(map, store) {
       const dash = Math.max(9, w * 6);
       ctx.setLineDash([dash * 0.4, dash * 1.7]);
       ctx.lineDashOffset = -(view.time * 60 * RENDER.flowSpeed * 14) % (dash * 2.1);
-      ctx.strokeStyle = withAlpha(dark ? '#ffffff' : '#0b1626', focused ? 0.95 : 0.55);
+      ctx.strokeStyle = withAlpha(focused ? '#ffffff' : (ik.dark ? '#ffffff' : C.ink), focused ? 0.95 : 0.5);
       ctx.lineWidth = w * 0.8;
       ctx.stroke();
       ctx.setLineDash([]);
@@ -98,7 +130,7 @@ export function installOverlays(map, store) {
     if (route.geometryEstimated && !route.path) {
       trace(ctx, pts);
       ctx.setLineDash([4 * view.dpr, 5 * view.dpr]);
-      ctx.strokeStyle = withAlpha(C.amber, 0.8);
+      ctx.strokeStyle = withAlpha(C.gold, 0.8);
       ctx.lineWidth = w * 0.7;
       ctx.stroke();
       ctx.setLineDash([]);
@@ -178,13 +210,13 @@ export function installOverlays(map, store) {
       const r = Math.abs(edge.x - s.x);
       if (r < 2) continue;
       const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      g.addColorStop(0, withAlpha(C.red, 0.26));
-      g.addColorStop(0.65, withAlpha(C.orange, 0.12));
+      g.addColorStop(0, withAlpha(C.danger, 0.26));
+      g.addColorStop(0.65, withAlpha(C.warn, 0.12));
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill();
       const pulse = view.reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin(view.time * 2.2);
-      ctx.strokeStyle = withAlpha(C.red, 0.22 + pulse * 0.28);
+      ctx.strokeStyle = withAlpha(C.danger, 0.22 + pulse * 0.28);
       ctx.lineWidth = 1.6 * view.dpr;
       ctx.beginPath(); ctx.arc(s.x, s.y, r * (0.62 + pulse * 0.34), 0, Math.PI * 2); ctx.stroke();
     }
@@ -194,7 +226,7 @@ export function installOverlays(map, store) {
 
   map.addOverlay((ctx, view) => {
     if (!on('depots')) return;
-    const dark = isDark();
+    const ik = ink();
     for (const d of store.depots) {
       const s = view.toScreen(d.lon, d.lat);
       if (offscreen(s, view, 60)) continue;
@@ -203,24 +235,24 @@ export function installOverlays(map, store) {
 
       ctx.save();
       const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 3.4);
-      g.addColorStop(0, withAlpha(C.cyan, 0.3));
+      g.addColorStop(0, withAlpha(C.teal, 0.3));
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 3.4, 0, Math.PI * 2); ctx.fill();
 
       ctx.translate(s.x, s.y);
       ctx.rotate(Math.PI / 4);
-      ctx.fillStyle = dark ? '#0d1522' : '#ffffff';
-      ctx.strokeStyle = selected ? (dark ? '#ffffff' : '#0b1626') : C.cyan;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = selected ? C.gold : C.teal;
       ctx.lineWidth = (selected ? 3 : 2) * view.dpr;
       ctx.beginPath(); ctx.rect(-r * 0.72, -r * 0.72, r * 1.44, r * 1.44); ctx.fill(); ctx.stroke();
       ctx.rotate(-Math.PI / 4);
-      ctx.fillStyle = C.cyan;
+      ctx.fillStyle = C.teal;
       ctx.beginPath(); ctx.arc(0, 0, r * 0.28, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
 
       if (on('labels') && view.zoom > 10.5) {
-        label(ctx, view, s.x, s.y + r * 2.4, d.name.toUpperCase(), dark, 'center');
+        label(ctx, view, s.x, s.y + r * 2.4, d.name.toUpperCase(), ik, 'center');
       }
     }
   });
@@ -229,7 +261,7 @@ export function installOverlays(map, store) {
 
   map.addOverlay((ctx, view) => {
     if (!on('deliveries')) return;
-    const dark = isDark();
+    const ik = ink();
     const sel = store.selection;
     const r = clamp((view.zoom - 8) * 1.6, 3.5, 8) * view.dpr;
 
@@ -240,7 +272,7 @@ export function installOverlays(map, store) {
       const unserved = o.status === 'unserved';
       const selected = sel.kind === 'order' && sel.id === o.id;
       const hovered = store.hover.kind === 'order' && store.hover.id === o.id;
-      const colour = unserved ? C.red : delivered ? C.green : (PRIORITY_COLOR[o.priority] || C.cyan);
+      const colour = unserved ? C.danger : delivered ? C.success : (PRIORITY_COLOR[o.priority] || C.teal);
 
       ctx.save();
       if (selected || hovered) {
@@ -250,7 +282,7 @@ export function installOverlays(map, store) {
       if (o.priority === 'critical' && !delivered && !view.reducedMotion) {
         const pulse = frac(view.time * 1.3 + o.lon * 0.4);
         ctx.beginPath(); ctx.arc(s.x, s.y, r * (1 + pulse * 2.2), 0, Math.PI * 2);
-        ctx.strokeStyle = withAlpha(C.red, 0.4 * (1 - pulse));
+        ctx.strokeStyle = withAlpha(C.danger, 0.4 * (1 - pulse));
         ctx.lineWidth = 1.6 * view.dpr; ctx.stroke();
       }
 
@@ -258,12 +290,12 @@ export function installOverlays(map, store) {
       ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
       ctx.fillStyle = withAlpha(colour, delivered ? 0.55 : 1);
       ctx.fill();
-      ctx.strokeStyle = dark ? 'rgba(6,11,18,.9)' : 'rgba(255,255,255,.95)';
+      ctx.strokeStyle = selected ? C.gold : ik.pinStroke;
       ctx.lineWidth = (selected ? 3 : 2) * view.dpr;
       ctx.stroke();
 
       if (delivered) {
-        ctx.strokeStyle = dark ? '#06111a' : '#ffffff';
+        ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.8 * view.dpr;
         ctx.beginPath();
         ctx.moveTo(s.x - r * 0.45, s.y);
@@ -274,7 +306,7 @@ export function installOverlays(map, store) {
       ctx.restore();
 
       if (on('labels') && (view.zoom > 13 || selected)) {
-        label(ctx, view, s.x + r * 1.8, s.y + 3.5 * view.dpr, o.ref, dark, 'left');
+        label(ctx, view, s.x + r * 1.8, s.y + 3.5 * view.dpr, o.ref, ik, 'left');
       }
     }
   });
@@ -283,7 +315,7 @@ export function installOverlays(map, store) {
 
   map.addOverlay((ctx, view) => {
     if (!on('vehicles')) return;
-    const dark = isDark();
+    const ik = ink();
     const sel = store.selection;
     const size = clamp((view.zoom - 7) * 2.2, 7, 16) * view.dpr;
 
@@ -292,7 +324,7 @@ export function installOverlays(map, store) {
       const s = view.toScreen(v.lon, v.lat);
       if (offscreen(s, view, 60)) return;
       const selected = sel.kind === 'vehicle' && sel.id === v.id;
-      const colour = v.available ? vehicleColor(i) : C.red;
+      const colour = v.available ? vehicleColor(i) : C.danger;
       const statusColour = STATUS_COLOR[v.status] || C.faint;
 
       ctx.save();
@@ -306,7 +338,7 @@ export function installOverlays(map, store) {
       if ((v.status === 'delayed' || !v.available) && !view.reducedMotion) {
         const pulse = frac(view.time * 1.1 + i * 0.3);
         ctx.beginPath(); ctx.arc(s.x, s.y, size * (1.3 + pulse * 2.4), 0, Math.PI * 2);
-        ctx.strokeStyle = withAlpha(C.red, 0.45 * (1 - pulse));
+        ctx.strokeStyle = withAlpha(C.danger, 0.45 * (1 - pulse));
         ctx.lineWidth = 1.8 * view.dpr; ctx.stroke();
       }
 
@@ -321,15 +353,113 @@ export function installOverlays(map, store) {
       ctx.closePath();
       ctx.fillStyle = colour;
       ctx.fill();
-      ctx.strokeStyle = selected ? (dark ? '#ffffff' : '#0b1626') : (dark ? 'rgba(4,9,16,.9)' : 'rgba(255,255,255,.95)');
+      ctx.strokeStyle = selected ? C.gold : ik.pinStroke;
       ctx.lineWidth = (selected ? 2.6 : 1.6) * view.dpr;
       ctx.stroke();
       ctx.restore();
 
       if (on('labels') && (view.zoom > 11 || selected)) {
-        label(ctx, view, s.x, s.y - size * 2.1, v.callsign, dark, 'center');
+        label(ctx, view, s.x, s.y - size * 2.1, v.callsign, ik, 'center');
       }
     });
+  });
+
+  /* ------------------------------------------------------ personal trip */
+
+  /**
+   * PERSONAL mode draws one journey rather than a fleet: the alternatives the
+   * routing service actually returned, in teal, with the chosen one in gold on
+   * top. Unselected alternatives stay visible because the comparison is the
+   * whole point — hiding them would leave the numbers unexplained.
+   */
+  map.addOverlay((ctx, view) => {
+    const trip = store.trip;
+    if (!trip || !store.isPersonal) return;
+    const ik = ink();
+    const chosenId = trip.chosen?.trip?.id;
+    const w = clamp(view.zoom - 7, 1, 5) * view.dpr;
+
+    for (const pass of [0, 1]) {
+      for (const t of trip.trips) {
+        const isChosen = t.id === chosenId;
+        if ((pass === 0) === isChosen) continue;
+        const pts = t.points.map((p) => view.toScreen(p.lon, p.lat));
+        if (pts.length < 2) continue;
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        trace(ctx, pts);
+        ctx.strokeStyle = ik.dark ? 'rgba(6,22,32,.5)' : 'rgba(255,255,255,.8)';
+        ctx.lineWidth = w * (isChosen ? 3.8 : 2.6);
+        ctx.stroke();
+
+        if (isChosen) {
+          trace(ctx, pts);
+          ctx.strokeStyle = withAlpha(C.goldBright, 0.28);
+          ctx.lineWidth = w * 5.6;
+          ctx.stroke();
+        }
+
+        trace(ctx, pts);
+        ctx.strokeStyle = isChosen ? C.gold : withAlpha(C.teal, 0.55);
+        ctx.lineWidth = w * (isChosen ? 2.2 : 1.3);
+        if (t.estimated) ctx.setLineDash([5 * view.dpr, 5 * view.dpr]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+
+    // Start and end. A ring for where you are, a filled pin for where you are
+    // going: the same shape language the fleet map uses for depots and stops.
+    const r = 8 * view.dpr;
+    for (const [point, kind] of [[trip.from, 'start'], [trip.to, 'end']]) {
+      if (!point) continue;
+      const sc = view.toScreen(point.lon, point.lat);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(sc.x, sc.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = kind === 'end' ? C.gold : '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = kind === 'end' ? '#ffffff' : C.teal;
+      ctx.lineWidth = 3 * view.dpr;
+      ctx.stroke();
+      ctx.restore();
+      if (on('labels')) {
+        label(ctx, view, sc.x, sc.y - r * 1.9,
+          kind === 'end' ? 'DESTINATION' : 'START', ik, 'center');
+      }
+    }
+  });
+
+  /* ---------------------------------------------------- replan sweep */
+
+  /**
+   * The network-replan sweep. A single band of light crossing the map in the
+   * direction of the plan, raised by animateNetworkReplan(). It draws nothing
+   * at all when no sweep is in flight, which is also the case whenever the
+   * operator has asked for reduced motion.
+   */
+  map.addOverlay((ctx, view) => {
+    const sw = map.sweep;
+    if (!sw) return;
+    const t = (performance.now() - sw.start) / sw.duration;
+    if (t >= 1 || t < 0) return;
+    const eased = 1 - (1 - t) ** 3;
+    const x = -view.width * 0.3 + eased * view.width * 1.6;
+    const band = view.width * 0.26;
+
+    ctx.save();
+    const g = ctx.createLinearGradient(x - band, 0, x + band, 0);
+    const fade = Math.sin(Math.PI * t) ** 0.7;
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.44, withAlpha(C.tealSoft, 0.1 * fade));
+    g.addColorStop(0.5, withAlpha(C.goldSoft, 0.3 * fade));
+    g.addColorStop(0.56, withAlpha(C.tealSoft, 0.1 * fade));
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, view.width, view.height);
+    ctx.restore();
   });
 
   /* --------------------------------------------------- pick handler */
@@ -388,15 +518,15 @@ const offscreen = (s, view, pad) =>
   s.x < -pad || s.y < -pad || s.x > view.width + pad || s.y > view.height + pad;
 
 /** Halo text so labels stay legible over any cartography. */
-function label(ctx, view, x, y, text, dark, align) {
+function label(ctx, view, x, y, text, ik, align) {
   ctx.save();
   ctx.font = `600 ${10.5 * view.dpr}px ui-monospace, monospace`;
   ctx.textAlign = align;
-  ctx.lineWidth = 3.2 * view.dpr;
+  ctx.lineWidth = 3.4 * view.dpr;
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = dark ? 'rgba(6,11,18,.85)' : 'rgba(255,255,255,.92)';
+  ctx.strokeStyle = ik.labelHalo;
   ctx.strokeText(text, x, y);
-  ctx.fillStyle = dark ? 'rgba(240,246,252,.95)' : 'rgba(14,22,35,.95)';
+  ctx.fillStyle = ik.label;
   ctx.fillText(text, x, y);
   ctx.restore();
 }
@@ -412,7 +542,7 @@ function segmentDistance(px, py, ax, ay, bx, by) {
 function recolour(ctx, w, h) {
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
-  const ramp = [[10, 24, 20], [24, 120, 84], [220, 196, 90], [232, 118, 58], [226, 62, 84]];
+  const ramp = CARBON_RAMP;
   for (let i = 0; i < d.length; i += 4) {
     const a = d[i + 3] / 255;
     if (a <= 0.004) { d[i + 3] = 0; continue; }

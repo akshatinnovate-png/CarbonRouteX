@@ -14,7 +14,7 @@
  * and the UI says so rather than implying a security property it lacks.
  */
 
-import { VEHICLE_TYPES, PRIORITY, SIM, APP } from '../config.js';
+import { VEHICLE_TYPES, PERSONAL_VEHICLES, PRIORITY, SIM, APP } from '../config.js';
 import { EV, emit, on } from '../core/bus.js';
 import { el, mount, announce, focusInto } from '../util/dom.js';
 import { clock, num } from '../util/format.js';
@@ -24,7 +24,7 @@ import {
   locationPicker, chip, empty,
 } from './components.js';
 
-const STEPS = [
+const LOGISTICS_STEPS = [
   { key: 'welcome', label: 'Welcome' },
   { key: 'region', label: 'Region' },
   { key: 'depots', label: 'Depots' },
@@ -33,11 +33,29 @@ const STEPS = [
   { key: 'done', label: 'Ready' },
 ];
 
+/**
+ * PERSONAL setup asks for three things, because three is all it needs: who you
+ * are, roughly where you are, and what you drive. Walking somebody planning a
+ * commute through depot dock counts would be absurd.
+ */
+const PERSONAL_STEPS = [
+  { key: 'welcome', label: 'Welcome' },
+  { key: 'region', label: 'Where you are' },
+  { key: 'vehicle', label: 'Your vehicle' },
+  { key: 'done', label: 'Ready' },
+];
+
+const stepsFor = (mode) => (mode === 'PERSONAL' ? PERSONAL_STEPS : LOGISTICS_STEPS);
+
 export function initOnboarding(store, { onComplete }) {
   const root = document.getElementById('onboarding');
   let step = 0;
+  let STEPS = stepsFor(store.mode);
+  const personal = () => store.mode === 'PERSONAL';
 
   function show() {
+    STEPS = stepsFor(store.mode);
+    step = Math.min(step, STEPS.length - 1);
     root.hidden = false;
     root.setAttribute('aria-hidden', 'false');
     document.getElementById('app').setAttribute('aria-hidden', 'true');
@@ -80,7 +98,9 @@ export function initOnboarding(store, { onComplete }) {
           el('span.ob-step-dot', { text: i < step ? '✓' : String(i + 1) }),
           el('span', { text: s.label })))),
           el('p.ob-note', {
-            text: 'Everything you add here can be changed later from the Depots, Fleet and Orders tabs.',
+            text: personal()
+              ? 'Nothing here is final. Your vehicles and your usual starting point can be changed at any time.'
+              : 'Everything you add here can be changed later from the Depots, Fleet and Orders tabs.',
           })),
         el('main.ob-main', { id: 'ob-main' }, renderStep(current.key))));
     const firstInput = root.querySelector('.ob-main input, .ob-main select, .ob-main button');
@@ -94,6 +114,7 @@ export function initOnboarding(store, { onComplete }) {
       case 'depots': return stepDepots();
       case 'fleet': return stepFleet();
       case 'orders': return stepOrders();
+      case 'vehicle': return stepVehicle();
       default: return stepDone();
     }
   }
@@ -132,11 +153,13 @@ export function initOnboarding(store, { onComplete }) {
     };
 
     return el('div.ob-panel', null,
-      stepHead('Welcome to CarbonRoute',
-        'A logistics command centre that plans your fleet across real roads, and optimises for time, cost and carbon at the same time.'),
+      stepHead(personal() ? 'Welcome to CarbonRoute' : 'Welcome to CarbonRoute',
+        personal()
+          ? 'Journey planning that treats time, cost and carbon as three separate answers — over real roads, with the maths shown.'
+          : 'A logistics command centre that plans your fleet across real roads, and optimises for time, cost and carbon at the same time.'),
       el('div.ob-form', null,
         field('Your name', name, { required: true }),
-        field('Organisation', org, { hint: 'Shown in the header. Optional.' })),
+        personal() ? null : field('Organisation', org, { hint: 'Shown in the header. Optional.' })),
       el('div.ob-callout', null,
         el('span', { html: icon('info', 15) }),
         el('p', {
@@ -144,8 +167,10 @@ export function initOnboarding(store, { onComplete }) {
             + 'your name simply labels this workspace, and all of your data stays in this browser.',
         })),
       el('ul.ob-facts', null,
-        fact('map', 'Real map, real roads', 'OpenStreetMap cartography with road routing from OSRM. No API key needed.'),
-        fact('bolt', 'A real optimiser', 'Capacity, range and deadline constrained vehicle routing, not a nearest-neighbour toy.'),
+        fact('map', 'Real map, real roads', 'Satellite imagery with road routing over OpenStreetMap geometry. No API key needed.'),
+        personal()
+          ? fact('scale', 'Four honest comparisons', 'Fastest, cheapest, greenest and balanced — and it says so when they are the same road.')
+          : fact('bolt', 'A real optimiser', 'Capacity, range and deadline constrained vehicle routing, not a nearest-neighbour toy.'),
         fact('leaf', 'Carbon as an objective', 'Emissions are optimised alongside time and cost, not reported after the fact.')),
       nav({ back: false, next: 'Get started', onNext: submit }));
   }
@@ -165,9 +190,11 @@ export function initOnboarding(store, { onComplete }) {
     const current = store.workspace.region;
 
     return el('div.ob-panel', null,
-      stepHead('Where do you operate?',
-        'This centres the map and biases address search. You can move outside it at any time.'),
-      el('div.ob-form', null, field('Operating region', picker, {
+      stepHead(personal() ? 'Where are you usually starting from?' : 'Where do you operate?',
+        personal()
+          ? 'This centres the map and makes address search find the right place first. You can travel anywhere from here.'
+          : 'This centres the map and biases address search. You can move outside it at any time.'),
+      el('div.ob-form', null, field(personal() ? 'Your area' : 'Operating region', picker, {
         hint: 'A city or metro area works best. Pick on the map if your area has no obvious name.',
       })),
       current ? el('div.ob-callout', null,
@@ -352,9 +379,84 @@ export function initOnboarding(store, { onComplete }) {
       nav({ next: 'Continue', nextDisabled: store.orders.length === 0 }));
   }
 
+  /* ------------------------------------------------- vehicle (personal) */
+
+  function stepVehicle() {
+    const p = store.personal;
+    const label = textInput({ placeholder: 'My car', value: '' });
+    const consumption = numberInput({
+      value: PERSONAL_VEHICLES[p.vehicleKey]?.consumption ?? 7.4,
+      min: 0, max: 400, step: 0.1,
+    });
+
+    const pick = (key) => {
+      store.setPersonal({ vehicleKey: key });
+      consumption.input.value = String(PERSONAL_VEHICLES[key].consumption);
+      render();
+    };
+
+    return el('div.ob-panel', null,
+      stepHead('What do you travel in?',
+        'Every estimate below — energy, cost and CO\u2082e — is computed for this vehicle. Pick the closest match; '
+        + 'you can save several and switch between them later.'),
+      el('div.vehicle-picker.vehicle-picker--lg', { role: 'radiogroup', 'aria-label': 'Vehicle type' },
+        ...Object.values(PERSONAL_VEHICLES).map((t) => el('button.vehicle-chip', {
+          type: 'button', role: 'radio',
+          'aria-checked': String(p.vehicleKey === t.key),
+          onclick: () => pick(t.key),
+        },
+        el('span.vc-icon', { html: icon(t.icon, 16) }),
+        el('span.vc-label', { text: t.label }),
+        el('span.vc-note', { text: t.note })))),
+
+      el('div.ob-form', null,
+        fieldRow(
+          field('Name it (optional)', label, { hint: 'Only so you can tell two vehicles apart.' }),
+          field(`Consumption per 100 km`, consumption, {
+            hint: `Typical for a ${PERSONAL_VEHICLES[p.vehicleKey]?.label.toLowerCase()} is `
+              + `${PERSONAL_VEHICLES[p.vehicleKey]?.consumption} ${PERSONAL_VEHICLES[p.vehicleKey]?.unit}. `
+              + 'Your own figure gives a better estimate.',
+          }))),
+
+      el('div.ob-callout', null,
+        el('span', { html: icon('info', 15) }),
+        el('p', {
+          text: 'These are estimates from published emission factors applied to real road geometry. '
+            + 'They are not measurements from your vehicle, and the application never presents them as such.',
+        })),
+
+      p.vehicles.length
+        ? el('div.ob-list', null,
+          el('h3', { text: 'Saved' }),
+          el('div.stack-sm', null, ...p.vehicles.map((v) => entityRow(
+            v.label,
+            `${PERSONAL_VEHICLES[v.key]?.label || v.key}`,
+            () => { store.removePersonalVehicle(v.id); render(); },
+          ))))
+        : null,
+
+      el('div.ob-nav', null,
+        el('button.btn', { type: 'button', text: 'Back', onclick: () => goTo(step - 1) }),
+        el('span.spacer'),
+        el('button.btn', {
+          type: 'button', text: 'Save this vehicle',
+          onclick: () => {
+            store.addPersonalVehicle({
+              key: p.vehicleKey,
+              label: label.value,
+              consumption: Number(consumption.input.value),
+            });
+            announce('Vehicle saved');
+            render();
+          },
+        }),
+        el('button.btn.btn--primary', { type: 'button', text: 'Continue', onclick: () => goTo(step + 1) })));
+  }
+
   /* --------------------------------------------------------- done */
 
   function stepDone() {
+    if (personal()) return stepDonePersonal();
     return el('div.ob-panel', null,
       stepHead('Your network is ready',
         'CarbonRoute will now fetch real road distances between every stop and build an optimised plan.'),
@@ -378,13 +480,37 @@ export function initOnboarding(store, { onComplete }) {
         })));
   }
 
+  function stepDonePersonal() {
+    const v = PERSONAL_VEHICLES[store.personal.vehicleKey];
+    return el('div.ob-panel', null,
+      stepHead('You are ready to go',
+        'Set a start and a destination, and CarbonRoute will compare the real roads between them four ways.'),
+      el('div.ob-summary', null,
+        summaryTile('Vehicle', v?.label || 'Car'),
+        summaryTile('Saved vehicles', store.personal.vehicles.length),
+        summaryTile('Area', store.workspace.region?.short || 'Anywhere')),
+      el('div.ob-callout', null,
+        el('span', { html: icon('info', 15) }),
+        el('p', {
+          text: 'Roads and durations come from a free public routing service over OpenStreetMap data. '
+            + 'Traffic is modelled from time of day, not observed live — every figure is labelled accordingly.',
+        })),
+      el('div.ob-nav', null,
+        el('button.btn', { type: 'button', text: 'Back', onclick: () => goTo(step - 1) }),
+        el('span.spacer'),
+        el('button.btn.btn--primary.btn--lg', {
+          type: 'button', html: `${icon('route', 14)}<span>Plan my first journey</span>`,
+          onclick: finish,
+        })));
+  }
+
   const summaryTile = (label, value) => el('div.ob-tile', null,
     el('strong.num', { text: String(value) }),
     el('span', { text: label }));
 
   function entityRow(title, sub, onRemove, accent) {
     return el('div.ob-row', null,
-      el('span.ob-row-bar', { style: { background: accent || 'var(--cyan)' } }),
+      el('span.ob-row-bar', { style: { background: accent || 'var(--teal)' } }),
       el('span.ob-row-text', null,
         el('strong', { text: title }),
         el('small', { text: sub })),
@@ -400,9 +526,9 @@ export function initOnboarding(store, { onComplete }) {
 
 function brandMark() {
   return `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <path d="M6 22c4-10 16-10 20 0" stroke="#34d99a" stroke-width="2.8" stroke-linecap="round"/>
-    <circle cx="6" cy="22" r="3.2" fill="#62c8f8"/>
-    <circle cx="26" cy="22" r="3.2" fill="#34d99a"/>
-    <circle cx="16" cy="13.5" r="2.2" fill="#f2f6fb"/>
+    <path d="M6 22c4-10 16-10 20 0" stroke="#0d8f8f" stroke-width="2.9" stroke-linecap="round"/>
+    <circle cx="6" cy="22" r="3.2" fill="#07636a"/>
+    <circle cx="26" cy="22" r="3.2" fill="#b08423"/>
+    <circle cx="16" cy="13.2" r="2.3" fill="#d4a843"/>
   </svg>`;
 }
