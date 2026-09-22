@@ -143,11 +143,20 @@ http.createServer((req, res) => {
     // fragments, so the app has to sum distance per name to describe a route.
     const ROADS = ['NH-33', 'Ranchi Ring Road', 'NH-114A', 'Old Coastal Road', 'SH-9', 'Grand Trunk Road'];
     const pick = Math.abs(Math.round((pts[1]?.lon ?? 0) * 1000)) % ROADS.length;
+    const mid = geom[Math.floor(geom.length / 2)] || pts[0];
     const steps = [
-      { name: ROADS[pick], distance: distance * 0.58 },
-      { name: ROADS[(pick + 2) % ROADS.length], distance: distance * 0.27 },
-      { name: '', distance: distance * 0.10 },
-      { name: 'Service Road', distance: distance * 0.05 },
+      { name: ROADS[pick], distance: distance * 0.34, duration: 300,
+        maneuver: { type: 'depart', location: [pts[0].lon, pts[0].lat] } },
+      { name: ROADS[pick], distance: distance * 0.24, duration: 220,
+        maneuver: { type: 'continue', location: [mid.lon, mid.lat] } },
+      { name: ROADS[(pick + 2) % ROADS.length], distance: distance * 0.27, duration: 260,
+        maneuver: { type: 'turn', modifier: 'left', location: [mid.lon, mid.lat] } },
+      { name: '', distance: distance * 0.10, duration: 90,
+        maneuver: { type: 'roundabout', exit: 2, location: [mid.lon, mid.lat] } },
+      { name: 'Service Road', distance: distance * 0.05, duration: 60,
+        maneuver: { type: 'turn', modifier: 'right', location: [mid.lon, mid.lat] } },
+      { name: '', distance: 0, duration: 0,
+        maneuver: { type: 'arrive', location: [pts[pts.length - 1].lon, pts[pts.length - 1].lat] } },
     ];
     const base = {
       geometry: encodePolyline(geom, 6),

@@ -22,7 +22,9 @@ import { installOverlays } from './render/overlays.js';
 import { initShell, initTopbar } from './ui/shell.js';
 import { initOnboarding } from './ui/onboarding.js';
 import { initLanding } from './ui/landing.js';
-import { enterCommandCenter, animateNetworkReplan } from './ui/motion.js';
+import {
+  enterCommandCenter, animateNetworkReplan, revealRoute, toastIn, toastOut,
+} from './ui/motion.js';
 import { initKeyboard } from './input/keyboard.js';
 import { el, mount, announce } from './util/dom.js';
 import { icon } from './ui/icons.js';
@@ -106,6 +108,8 @@ async function boot() {
       await store.optimizeFleet({ trigger: 'First plan', label: 'Optimised plan' });
       await animateNetworkReplan(map);
       fitRoutes(map, store);
+      // The sweep says "something changed"; the trace says what.
+      revealRoute(map, { duration: 1100 });
     },
   });
 
@@ -179,13 +183,9 @@ function initToasts() {
       el('span', { html: icon(tone === 'bad' ? 'alert' : tone === 'good' ? 'check' : 'info') }),
       el('span', { text: message }));
     host.append(node);
+    toastIn(node);
     announce(message, tone === 'bad');
-    setTimeout(() => {
-      node.style.transition = 'opacity 260ms, transform 260ms';
-      node.style.opacity = '0';
-      node.style.transform = 'translateY(6px)';
-      setTimeout(() => node.remove(), 280);
-    }, duration);
+    setTimeout(() => { toastOut(node).then(() => node.remove()); }, duration);
   });
 }
 

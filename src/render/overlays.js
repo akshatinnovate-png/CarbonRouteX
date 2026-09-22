@@ -82,18 +82,20 @@ export function installOverlays(map, store) {
     const w = clamp(view.zoom - 7, 1, 5) * view.dpr;
     const alpha = dimmed ? 0.2 : focused ? 1 : 0.82;
 
+    const grow = revealProgress(map);
+
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
     // A casing keeps the line readable over busy cartography and over imagery.
-    trace(ctx, pts);
+    trace(ctx, pts, grow);
     ctx.strokeStyle = ik.dark ? 'rgba(6,22,32,.5)' : 'rgba(255,255,255,.78)';
     ctx.lineWidth = w * (focused ? 3.6 : 2.7);
     ctx.stroke();
 
     if (flagged > 0) {
-      trace(ctx, pts);
+      trace(ctx, pts, grow);
       ctx.strokeStyle = withAlpha(C.goldBright, 0.55 * flagged);
       ctx.lineWidth = w * (3 + 5 * flagged);
       ctx.stroke();
@@ -102,13 +104,13 @@ export function installOverlays(map, store) {
     if (focused) {
       // A second, softer gold halo: the selected route should be findable at a
       // glance without being the only thing you can see.
-      trace(ctx, pts);
+      trace(ctx, pts, grow);
       ctx.strokeStyle = withAlpha(C.goldBright, 0.3);
       ctx.lineWidth = w * 5.2;
       ctx.stroke();
     }
 
-    trace(ctx, pts);
+    trace(ctx, pts, grow);
     ctx.strokeStyle = withAlpha(colour, alpha);
     ctx.lineWidth = w * (focused ? 2.1 : 1.5);
     ctx.stroke();
@@ -378,37 +380,85 @@ export function installOverlays(map, store) {
     const ik = ink();
     const chosenId = trip.chosen?.trip?.id;
     const w = clamp(view.zoom - 7, 1, 5) * view.dpr;
+    // While a reveal is in flight the chosen route draws progressively; the
+    // alternatives fade in behind it so the comparison arrives second.
+    const p = revealProgress(map);
 
     for (const pass of [0, 1]) {
       for (const t of trip.trips) {
         const isChosen = t.id === chosenId;
         if ((pass === 0) === isChosen) continue;
-        const pts = t.points.map((p) => view.toScreen(p.lon, p.lat));
+        const pts = t.points.map((pt) => view.toScreen(pt.lon, pt.lat));
         if (pts.length < 2) continue;
 
+        // The chosen line is traced; the others simply arrive, slightly later.
+        const grow = isChosen ? p : 1;
+        const fade = isChosen ? 1 : clamp((p - 0.45) / 0.55, 0, 1);
+        if (fade <= 0) continue;
+
         ctx.save();
+        ctx.globalAlpha = fade;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        trace(ctx, pts);
+        trace(ctx, pts, grow);
         ctx.strokeStyle = ik.dark ? 'rgba(6,22,32,.5)' : 'rgba(255,255,255,.8)';
         ctx.lineWidth = w * (isChosen ? 3.8 : 2.6);
         ctx.stroke();
 
         if (isChosen) {
-          trace(ctx, pts);
+          trace(ctx, pts, grow);
           ctx.strokeStyle = withAlpha(C.goldBright, 0.28);
           ctx.lineWidth = w * 5.6;
           ctx.stroke();
         }
 
-        trace(ctx, pts);
+        trace(ctx, pts, grow);
         ctx.strokeStyle = isChosen ? C.gold : withAlpha(C.teal, 0.55);
         ctx.lineWidth = w * (isChosen ? 2.2 : 1.3);
         if (t.estimated) ctx.setLineDash([5 * view.dpr, 5 * view.dpr]);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        // A bright head at the drawing tip: the eye follows it along the route
+        // and arrives where the journey ends, which is the point of tracing.
+        if (isChosen && grow < 1) {
+          const head = pointAlong(pts, grow);
+          if (head) {
+            ctx.beginPath();
+            ctx.arc(head.x, head.y, w * 1.9, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.strokeStyle = C.gold;
+            ctx.lineWidth = 2.4 * view.dpr;
+            ctx.stroke();
+          }
+        }
         ctx.restore();
       }
+    }
+
+    // The manoeuvre under the cursor in the directions list. Reading "turn left
+    // onto NH-33" without being shown the junction is the gap between a list
+    // and a map.
+    const focus = map.stepFocus;
+    if (focus) {
+      const sc = view.toScreen(focus.lon, focus.lat);
+      const age = view.reducedMotion ? 1 : clamp((performance.now() - focus.at) / 320, 0, 1);
+      const r = (7 + 5 * (1 - age)) * view.dpr;
+      ctx.save();
+      ctx.globalAlpha = 0.25 + 0.75 * age;
+      ctx.beginPath();
+      ctx.arc(sc.x, sc.y, r * 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = withAlpha(C.gold, 0.18);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sc.x, sc.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = C.gold;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3 * view.dpr;
+      ctx.stroke();
+      ctx.restore();
     }
 
     // Start and end. A ring for where you are, a filled pin for where you are
@@ -508,10 +558,68 @@ function routeWaypoints(route, store) {
   ];
 }
 
-function trace(ctx, pts) {
+function trace(ctx, pts, progress = 1) {
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  if (progress >= 1) {
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    return;
+  }
+  // Partial trace for the reveal: walk the polyline by cumulative screen
+  // length rather than by vertex count, so a route with dense city geometry
+  // and a sparse motorway tail still draws at an even speed.
+  const total = polyLength(pts);
+  const want = total * clamp(progress, 0, 1);
+  let run = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const seg = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (run + seg >= want) {
+      const t = seg > 0 ? (want - run) / seg : 0;
+      ctx.lineTo(pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+        pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t);
+      return;
+    }
+    ctx.lineTo(pts[i].x, pts[i].y);
+    run += seg;
+  }
+}
+
+/** The screen point a given fraction of the way along a polyline. */
+function pointAlong(pts, progress) {
+  const total = polyLength(pts);
+  if (!total) return null;
+  const want = total * clamp(progress, 0, 1);
+  let run = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const seg = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (run + seg >= want) {
+      const t = seg > 0 ? (want - run) / seg : 0;
+      return {
+        x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+        y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t,
+      };
+    }
+    run += seg;
+  }
+  return pts[pts.length - 1];
+}
+
+function polyLength(pts) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
+  return total;
+}
+
+/** 0..1 for a reveal in flight, or 1 when there is nothing to reveal. */
+function revealProgress(map) {
+  const r = map.reveal;
+  if (!r) return 1;
+  const t = (performance.now() - r.start) / r.duration;
+  if (t >= 1) return 1;
+  // Ease-out: the line leaves quickly and arrives gently.
+  return 1 - (1 - clamp(t, 0, 1)) ** 3;
 }
 
 const offscreen = (s, view, pad) =>

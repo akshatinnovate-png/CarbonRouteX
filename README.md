@@ -176,6 +176,22 @@ dozens of fragments; CarbonRoute sums distance per name and ranks by it, which
 turns those rows into *via NH-33 · Ranchi Ring Road* and *via NH-114A · SH-9* —
 routes somebody recognises.
 
+**Turn-by-turn directions.** The manoeuvre data arrives with the road names
+already being requested, so withholding it would mean telling somebody "20.7 km,
+43 min" and leaving them to work out the driving. Consecutive steps along one
+road are merged — "continue on NH-33" nine times is noise, not instruction — and
+hovering or tabbing through a step holds that junction on the map, because
+*turn left onto NH-33* is only useful once you can see where. It doubles as the
+text equivalent of the map: an ordered list a screen reader reads straight
+through.
+
+**A carbon ledger.** A product called CarbonRoute that forgets every journey is
+not keeping an account of anything. Two numbers, deliberately kept apart:
+**emitted**, which is a real total, and **avoided**, which is the gap between
+the road taken and the dirtiest road offered at the time. That second one is a
+comparison against a road not taken, not a reduction in absolute terms, and the
+interface says exactly that underneath it — a cleaner drive is still a drive.
+
 **"When should I leave?"** Every hour of the next half-day is costed for the
 chosen road and vehicle and drawn as a strip, cleanest hour in gold. Both
 levers move: traffic changes how long the drive takes and therefore how much
@@ -258,10 +274,11 @@ tokens live in `styles/tokens.css` and are mirrored for canvas drawing in
 
 **Every animation is declared in one place.** `src/ui/motion.js` exports the
 complete set of named primitives — `transitionToView`, `focusEntity`,
-`animateRouteChange`, `animateNetworkReplan`, `enterCommandCenter`,
-`exitCommandCenter`, `openPanel`, `closePanel`, `transitionMode`,
-`revealStagger`, `frameNetwork`, `pulseValue` — and views call those rather than
-writing their own keyframes. Two rules hold throughout:
+`focusStep`, `revealRoute`, `animateRouteChange`, `animateNetworkReplan`,
+`enterCommandCenter`, `exitCommandCenter`, `openPanel`, `closePanel`,
+`transitionMode`, `revealStagger`, `frameNetwork`, `countTo`, `flashDelta`,
+`toastIn`, `toastOut` — and views call those rather than writing their own
+keyframes. No component animates itself inline. Two rules hold throughout:
 
 1. **Motion carries meaning or it does not happen.** A camera moving to the thing
    you selected, a route redrawing, the network re-planning: each tells you
@@ -270,7 +287,19 @@ writing their own keyframes. Two rules hold throughout:
    the engines do not know `motion.js` exists. Every primitive is safe to make a
    no-op, which is exactly what `prefers-reduced-motion` does — it skips to the
    end state rather than animating faster. The interface is designed to look
-   right with every animation disabled.
+   right with every animation disabled, and the walkthrough asserts that a
+   reduced-motion reveal never leaves a half-drawn route behind.
+
+What that buys, concretely:
+
+| Motion | What it tells you |
+|---|---|
+| **Route tracing** | The line grows from where you are to where you are going, with a bright head at the tip, so the shape of the journey arrives in the order you would travel it |
+| **Counting readouts** | A figure that travels from its old value shows *that* it changed and roughly by how much; one that snaps only shows what it is now |
+| **Directional tabs** | Moving right along the tab bar sends the old view left and brings the new one in from the right, so the bar and the content agree about which way you went |
+| **Skeletons** | Placeholders shaped like the answer, so the layout never jumps when the real cards land |
+| **Replan sweep** | A band of light crossing the map says *something changed*; the trace that follows says *what* |
+| **Step focus** | Hovering a direction pins that junction in gold on the map |
 
 ## Architecture
 
@@ -540,7 +569,7 @@ them — the public instances are rate-limited and offer no uptime guarantee.
 node tests/engines.test.mjs
 ```
 
-98 tests, no dependencies, fully offline (the routing client's transport is stubbed
+103 tests, no dependencies, fully offline (the routing client's transport is stubbed
 to exercise the documented fallback path).
 
 **Projection** — `project`/`unproject` round-trip, world-pixel round-trip at every
@@ -587,6 +616,12 @@ schedule rather than bolted on afterwards.
 separately, unnamed and trivial segments are left out, and a route with no
 named roads says nothing instead of "via undefined".
 
+**Carbon ledger** — totals are the real sum of what was emitted; **"avoided"
+measures against the worst road offered and is never presented as having
+emitted less**; only journeys that offered a choice are scored on the choice;
+an empty or uncosted history produces zeroes rather than NaN; vehicles are
+broken out dirtiest first.
+
 **Assumed speed** — a city hop and a motorway run are not the same speed, speed
 rises with distance and levels off, and an estimated Ranchi–Delhi run is about
 a day at the wheel rather than the two days a flat 32 km/h used to imply.
@@ -618,11 +653,14 @@ node tests/walkthrough.mjs              # exits non-zero on any page error
 
 It drives a real Chromium through the landing page and its live map, the mode
 chooser, both onboarding paths with live geocoding, a PERSONAL journey compared
-four ways, picking a road no objective chose, the departure sweep, switching
-modes from Settings, the LOGISTICS tabs, a 390 px phone viewport and the whole
-thing again under `prefers-reduced-motion`. It fails on any page error, any
-horizontal overflow, and — the regression it was written for — **any loss of
-form input while the plan clock is running**.
+four ways, picking a road no objective chose, the departure sweep, the
+turn-by-turn directions and the junction they pin on the map, the carbon
+ledger, switching modes from Settings, the LOGISTICS tabs, a 390 px phone
+viewport and the whole thing again under `prefers-reduced-motion`. It fails on
+any page error, any horizontal overflow, a route that does not trace itself, a
+reveal left in flight under reduced motion, an "avoided" figure shown without
+saying what it is measured against, and — the regression it was written for —
+**any loss of form input while the plan clock is running**.
 
 The mock deliberately behaves like the *stingy* public OSRM: the `alternatives`
 request returns one road, and only a via-point request finds another. That is

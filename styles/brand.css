@@ -490,3 +490,73 @@
   font-family: var(--font-mono); font-size: 9px; color: var(--faint);
   letter-spacing: -.02em;
 }
+
+/* ------------------------------------------------------------ directions */
+
+.dir-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  counter-reset: dir;
+}
+.dir-step {
+  display: grid; grid-template-columns: 22px 1fr; gap: 10px;
+  padding: 8px 6px;
+  border-radius: var(--r-sm);
+  cursor: default;
+  position: relative;
+  transition: background var(--dur-1);
+}
+.dir-step + .dir-step { border-top: 1px solid var(--line-soft); }
+.dir-step:hover, .dir-step:focus-visible { background: var(--gold-wash); }
+.dir-step:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.dir-index {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 99px;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: 10px;
+  align-self: start;
+}
+.dir-step:hover .dir-index, .dir-step:focus-visible .dir-index {
+  background: var(--gold); color: #ffffff; border-color: var(--gold-deep);
+}
+/* The thread between manoeuvres: one journey, read top to bottom. */
+.dir-step:not(:last-child) .dir-index::after {
+  content: ''; position: absolute; left: 10px; top: 30px; bottom: -8px;
+  width: 1px; background: var(--line);
+}
+.dir-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dir-text { font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+.dir-dist {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- carbon ledger */
+
+.ledger-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+  height: 48px;
+  align-items: end;
+  margin: var(--sp-3) 0 var(--sp-2);
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--line);
+}
+.ledger-bar {
+  display: block; width: 100%;
+  background: var(--teal-soft);
+  border-radius: 2px 2px 0 0;
+  transition: background var(--dur-1), height var(--dur-3) var(--ease-out);
+}
+.ledger-bar:hover { background: var(--teal); }
+/* The most recent journey is the one you just made: it stays teal, the rest
+   recede, so the strip reads as history with a present moment in it. */
+.ledger-bar:last-child { background: var(--gold); }
+
+/* The journey rail is 340px wide: two tiles across, never four squeezed. */
+.trip-panel .tile-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.trip-panel .stat-value { font-size: 18px; letter-spacing: -.03em; }
+.trip-panel .stat-value small { font-size: 9.5px; }

@@ -867,11 +867,27 @@ export class Store {
       };
       this.tripPending = false;
 
+      // Enough to answer "what have my choices actually added up to", which is
+      // the question a product called CarbonRoute should be able to answer.
+      const dirtiest = set.trips.length ? Math.max(...set.trips.map((t) => t.co2)) : null;
       p.history = [
-        { at: this.trip.at, from: from.short || from.label, to: to.short || to.label,
-          km: chosen?.trip.km ?? null, co2: chosen?.trip.co2 ?? null, option: chosen?.key ?? null },
+        {
+          at: this.trip.at,
+          from: from.short || from.label,
+          to: to.short || to.label,
+          km: chosen?.trip.km ?? null,
+          co2: chosen?.trip.co2 ?? null,
+          minutes: chosen?.trip.minutes ?? null,
+          cost: chosen?.trip.cost ?? null,
+          option: chosen?.key ?? null,
+          vehicleKey: p.vehicleKey,
+          /** The worst road on offer, so "what you avoided" is a real number. */
+          co2Worst: dirtiest,
+          co2Best: set.best?.co2 ?? null,
+          roadsFound: set.roadsFound ?? set.trips.length,
+        },
         ...p.history,
-      ].slice(0, 12);
+      ].slice(0, 60);
       this.persist();
 
       this.logEvent('plan', `Journey planned — ${from.short || 'start'} to ${to.short || 'destination'}`);

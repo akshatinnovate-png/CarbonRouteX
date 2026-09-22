@@ -866,3 +866,41 @@ input[type="time"].input { font-family: var(--font-mono); }
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em;
   color: var(--teal-deep);
 }
+
+/* ---------------------------------------------------------- skeletons */
+
+/*
+ * Placeholders shaped like the answer, so the layout does not jump when the
+ * real content lands. The shimmer is slow and low-contrast on purpose: it
+ * should read as "working", not as a thing demanding attention.
+ */
+.sk {
+  display: block;
+  border-radius: var(--r-xs);
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 40%, var(--surface-2) 80%);
+  background-size: 300% 100%;
+  animation: sk-sweep 1.6s var(--ease-in-out) infinite;
+  animation-delay: var(--skeleton-delay, 0ms);
+}
+@keyframes sk-sweep { from { background-position: 140% 0; } to { background-position: -40% 0; } }
+
+.sk-title  { width: 42%; height: 13px; }
+.sk-pill   { width: 64px; height: 13px; border-radius: var(--r-pill); }
+.sk-line   { width: 68%; height: 9px; margin-top: 2px; }
+.sk-metric { height: 26px; }
+
+.route-option.is-skeleton { pointer-events: none; box-shadow: none; }
+.route-option.is-skeleton .ro-metrics { margin-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* No shimmer, but the shapes still hold the layout open. */
+  .sk { animation: none; background: var(--surface-2); }
+}
+
+/* A long title plus a chip must wrap rather than push the chip off the edge. */
+.panel-head { flex-wrap: wrap; row-gap: 4px; }
+.panel-head h2, .panel-head h3 { white-space: normal; }
+
+/* In a narrow rail a stat tile gets two lines, not a broken word. */
+.stat-value { flex-wrap: wrap; row-gap: 0; }
+.stat-value small { white-space: nowrap; }

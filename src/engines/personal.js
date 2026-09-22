@@ -61,6 +61,7 @@ export function evaluateTrip(alt, { vehicleKey = 'CAR', departMinutes = 9 * 60, 
     estimated: !!alt.estimated,
     via: !!alt.via,
     roads: alt.roads || [],
+    steps: alt.steps || [],
     km,
     minutes,
     arriveMinutes: departMinutes + minutes,
@@ -212,6 +213,60 @@ export function departureSweep(road, {
       && (now.co2 - best.co2) / Math.max(now.co2, 1e-9) > 0.04,
     co2Saved: now.co2 - best.co2,
     minutesSaved: now.minutes - best.minutes,
+  };
+}
+
+/**
+ * What a run of journeys adds up to.
+ *
+ * Two honest numbers, kept apart. `emitted` is what these journeys actually
+ * cost: it is a real total. `avoided` is the difference between the road taken
+ * and the worst road that was on offer at the time — which is a comparison
+ * against a counterfactual, not a saving in any absolute sense, and is
+ * labelled that way everywhere it appears. Driving a cleaner route than you
+ * might have is not the same as not driving.
+ */
+export function tripLedger(history = []) {
+  const trips = history.filter((h) => Number.isFinite(h.co2));
+  if (!trips.length) {
+    return { trips: 0, emitted: 0, km: 0, avoided: 0, cleanestPicks: 0, comparable: 0, byVehicle: [] };
+  }
+
+  let emitted = 0;
+  let km = 0;
+  let avoided = 0;
+  let cleanestPicks = 0;
+  let comparable = 0;
+  const byVehicle = new Map();
+
+  for (const h of trips) {
+    emitted += h.co2;
+    km += h.km || 0;
+
+    if (Number.isFinite(h.co2Worst) && h.co2Worst > h.co2) avoided += h.co2Worst - h.co2;
+
+    // Only journeys that actually offered a choice can be scored on it.
+    if (Number.isFinite(h.co2Best) && (h.roadsFound ?? 1) > 1) {
+      comparable++;
+      if (h.co2 <= h.co2Best + 1e-6) cleanestPicks++;
+    }
+
+    const key = h.vehicleKey || 'CAR';
+    const v = byVehicle.get(key) || { key, trips: 0, co2: 0, km: 0 };
+    v.trips++; v.co2 += h.co2; v.km += h.km || 0;
+    byVehicle.set(key, v);
+  }
+
+  return {
+    trips: trips.length,
+    emitted,
+    km,
+    avoided,
+    cleanestPicks,
+    comparable,
+    perKm: km > 0 ? emitted / km : 0,
+    byVehicle: [...byVehicle.values()].sort((a, b) => b.co2 - a.co2),
+    recent: trips.slice(0, 12),
   };
 }
 

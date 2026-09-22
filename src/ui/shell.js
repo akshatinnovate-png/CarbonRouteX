@@ -119,7 +119,9 @@ export function initShell(store, map) {
     page.firstElementChild?.adoptCanvas?.();
 
     // Tabs are angles on one network, so the change is a lift, not a load.
-    const direction = tabs.findIndex((t) => t.key === key) >= tabs.findIndex((t) => t.key === from) ? 1 : -1;
+    const fromIdx = tabs.findIndex((t) => t.key === from);
+    const toIdx = tabs.findIndex((t) => t.key === key);
+    const direction = fromIdx < 0 || toIdx >= fromIdx ? 1 : -1;
     transitionToView(from && from !== key ? built.get(from) : null, page, { direction });
 
     // The map canvas is only correctly sized once its host is visible.

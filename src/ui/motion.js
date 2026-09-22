@@ -80,16 +80,19 @@ function play(node, keyframes, options = {}) {
  * which reads as turning your attention rather than as loading a page.
  */
 export function transitionToView(outgoing, incoming, { direction = 1 } = {}) {
-  const shift = 10 * direction;
+  // Moving right along the tab bar sends the old view left and brings the new
+  // one in from the right, so the bar and the content agree about which way
+  // you just travelled. A vertical lift alone loses that.
+  const shift = 22 * (direction || 1);
   if (outgoing && outgoing !== incoming) {
     play(outgoing, [
-      { opacity: 1, transform: 'translateY(0)' },
-      { opacity: 0, transform: `translateY(${-shift * 0.5}px)` },
+      { opacity: 1, transform: 'translateX(0)' },
+      { opacity: 0, transform: `translateX(${-shift * 0.6}px)` },
     ], { duration: DUR.micro, easing: EASE.leave, fill: 'none' });
   }
   return play(incoming, [
-    { opacity: 0, transform: `translateY(${shift}px)` },
-    { opacity: 1, transform: 'translateY(0)' },
+    { opacity: 0, transform: `translateX(${shift}px) translateY(4px)` },
+    { opacity: 1, transform: 'translateX(0) translateY(0)' },
   ], { duration: DUR.view, easing: EASE.settle, fill: 'none' });
 }
 
@@ -195,6 +198,75 @@ function distanceInScreens(map, entity) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Numbers                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Count a readout from its previous value to its new one.
+ *
+ * A number that snaps tells you what it is now. A number that travels tells
+ * you it changed, by roughly how much, and in which direction — which is the
+ * whole point of watching a figure after you have altered the plan. The tween
+ * is short and eases out, so it reads as a settle rather than a slot machine.
+ *
+ * `format` receives a raw number and returns the string to display, so the
+ * caller keeps ownership of units, precision and locale.
+ */
+export function countTo(node, to, format = (v) => String(Math.round(v)), { duration = 620 } = {}) {
+  if (!node) return Promise.resolve();
+  const from = Number.isFinite(node._countValue) ? node._countValue : to;
+  node._countValue = to;
+
+  if (reducedMotion() || from === to || !Number.isFinite(from) || !Number.isFinite(to)) {
+    node.textContent = format(to);
+    return Promise.resolve();
+  }
+
+  // Cancel a tween still in flight, or two will fight over textContent.
+  if (node._countRaf) cancelAnimationFrame(node._countRaf);
+
+  const start = performance.now();
+  return new Promise((resolve) => {
+    const step = () => {
+      const t = Math.min((performance.now() - start) / duration, 1);
+      // Ease-out cubic: most of the distance early, then a gentle landing.
+      const eased = 1 - (1 - t) ** 3;
+      node.textContent = format(from + (to - from) * eased);
+      if (t < 1) {
+        node._countRaf = requestAnimationFrame(step);
+      } else {
+        node._countRaf = 0;
+        node.textContent = format(to);
+        resolve();
+      }
+    };
+    node._countRaf = requestAnimationFrame(step);
+  });
+}
+
+/**
+ * Mark a figure that has just changed, and say which way it went.
+ *
+ * Direction is colour, not motion: green for an improvement, red for a
+ * regression, gold for "this is the number that matters now". The lift is
+ * small enough to notice and too small to distract.
+ */
+export function flashDelta(node, direction = 'neutral') {
+  if (!node) return Promise.resolve();
+  const tint = {
+    good: 'var(--success)', bad: 'var(--danger)', key: 'var(--gold-deep)',
+  }[direction];
+  const frames = tint
+    ? [
+      { transform: 'translateY(3px)', color: tint, offset: 0 },
+      { transform: 'translateY(0)', color: tint, offset: 0.45 },
+      { transform: 'translateY(0)' },
+    ]
+    : [{ transform: 'translateY(3px)', opacity: 0.6 }, { transform: 'translateY(0)', opacity: 1 }];
+  return play(node, frames, { duration: DUR.panel, easing: EASE.settle, fill: 'none' });
+}
+
+/* ------------------------------------------------------------------ */
 /* Network storytelling                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -209,6 +281,35 @@ export function animateRouteChange(map, routeIds = [], { duration = 900 } = {}) 
   if (reducedMotion() || !ids.size) { map.invalidate?.(); return Promise.resolve(); }
   map.highlight = { ids, until: performance.now() + duration, duration };
   return pump(map, duration).then(() => { map.highlight = null; map.invalidate?.(); });
+}
+
+/**
+ * Trace a route onto the map, the way you would draw it for somebody.
+ *
+ * This is the one animation that genuinely narrates: the line grows from where
+ * you are to where you are going, so the shape of the journey arrives in the
+ * order you would travel it. It is presentation only — the numbers are already
+ * published and readable in the panel before the first pixel is drawn.
+ *
+ * The overlay layer reads `map.reveal` while painting; nothing else knows.
+ */
+export function revealRoute(map, { duration = 900 } = {}) {
+  if (!map) return Promise.resolve();
+  if (reducedMotion()) { map.reveal = null; map.invalidate?.(); return Promise.resolve(); }
+  map.reveal = { start: performance.now(), duration };
+  return pump(map, duration).then(() => { map.reveal = null; map.invalidate?.(); });
+}
+
+/**
+ * Hold one manoeuvre of a route under the cursor.
+ *
+ * Reading "turn left onto NH-33" and having to find that junction yourself is
+ * the gap between a list and a map. Passing null clears it.
+ */
+export function focusStep(map, point) {
+  if (!map) return;
+  map.stepFocus = point && Number.isFinite(point.lon) ? { ...point, at: performance.now() } : null;
+  map.invalidate?.();
 }
 
 /**
@@ -236,6 +337,29 @@ function pump(map, duration) {
     };
     requestAnimationFrame(step);
   });
+}
+
+/**
+ * A toast arriving and, later, leaving.
+ *
+ * It lives here rather than in the toast component for the same reason
+ * everything else does: one place to reason about timing, one place for
+ * reduced motion to take effect. `dismiss` resolves once the node is safe to
+ * remove — immediately when motion is reduced, which is why callers await it
+ * instead of assuming a delay.
+ */
+export function toastIn(node) {
+  return play(node, [
+    { opacity: 0, transform: 'translateY(14px) scale(.97)' },
+    { opacity: 1, transform: 'translateY(0) scale(1)' },
+  ], { duration: DUR.panel, easing: EASE.settle, fill: 'none' });
+}
+
+export function toastOut(node) {
+  return play(node, [
+    { opacity: 1, transform: 'translateY(0)' },
+    { opacity: 0, transform: 'translateY(8px) scale(.98)' },
+  ], { duration: DUR.quick, easing: EASE.leave, fill: 'forwards' });
 }
 
 /* ------------------------------------------------------------------ */

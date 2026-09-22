@@ -255,6 +255,7 @@ export class OsrmService {
           estimated: false,
           via: !!via,
           roads: namedRoads(raw),
+          steps: maneuvers(raw),
         });
         return true;
       };
@@ -329,6 +330,7 @@ export class OsrmService {
           estimated: false,
           via: r.via,
           roads: r.roads,
+          steps: r.steps,
         }));
 
       if (this.routeCache.size > 600) {
@@ -444,6 +446,78 @@ export function namedRoads(raw, limit = 3) {
     .filter(([, m]) => m / total >= 0.08)
     .slice(0, limit)
     .map(([name, m]) => ({ name, km: m / 1000, share: m / total }));
+}
+
+/**
+ * Turn-by-turn directions, from the manoeuvre data the route already carries.
+ *
+ * We ask for `steps` in order to name the roads; the instructions come free
+ * with them. Throwing that away and then telling somebody "20.7 km, 43 min"
+ * would be withholding the one thing they need to actually drive the route.
+ *
+ * Trivial zero-distance fragments are folded away, and consecutive steps along
+ * the same road are merged, because "continue on NH-33" nine times in a row is
+ * noise rather than instruction.
+ */
+export function maneuvers(raw) {
+  const out = [];
+  for (const leg of raw.legs || []) {
+    for (const step of leg.steps || []) {
+      const m = step.maneuver || {};
+      const name = (step.name || '').trim();
+      const entry = {
+        type: m.type || 'continue',
+        modifier: m.modifier || '',
+        exit: m.exit,
+        name: name && name !== '-' ? name : '',
+        km: (step.distance || 0) / 1000,
+        minutes: (step.duration || 0) / 60,
+        lon: Array.isArray(m.location) ? m.location[0] : undefined,
+        lat: Array.isArray(m.location) ? m.location[1] : undefined,
+      };
+
+      // Merge a run along one road into a single instruction.
+      const prev = out[out.length - 1];
+      if (prev && prev.name && prev.name === entry.name
+        && (entry.type === 'continue' || entry.type === 'new name')) {
+        prev.km += entry.km;
+        prev.minutes += entry.minutes;
+        continue;
+      }
+      out.push(entry);
+    }
+  }
+  // A zero-length step that is not the arrival is a routing artefact.
+  const cleaned = out.filter((e, i) => e.km > 0.005 || i === out.length - 1 || e.type === 'depart');
+  return cleaned.map((e) => ({ ...e, text: maneuverText(e) }));
+}
+
+const TURNS = {
+  left: 'Turn left', right: 'Turn right',
+  'slight left': 'Bear left', 'slight right': 'Bear right',
+  'sharp left': 'Sharp left', 'sharp right': 'Sharp right',
+  straight: 'Continue straight', uturn: 'Make a U-turn',
+};
+
+/** One manoeuvre, in the words somebody would use out loud. */
+export function maneuverText(step) {
+  const onto = step.name ? ` onto ${step.name}` : '';
+  const along = step.name ? ` on ${step.name}` : '';
+  switch (step.type) {
+    case 'depart': return step.name ? `Head out on ${step.name}` : 'Start the journey';
+    case 'arrive': return 'Arrive at your destination';
+    case 'roundabout': case 'rotary':
+      return step.exit ? `At the roundabout, take exit ${step.exit}${onto}` : `Take the roundabout${onto}`;
+    case 'merge': return `Merge${onto}`;
+    case 'on ramp': return `Take the slip road${onto}`;
+    case 'off ramp': return `Take the exit${onto}`;
+    case 'fork': return `${step.modifier === 'right' ? 'Keep right' : 'Keep left'} at the fork${onto}`;
+    case 'end of road': return `${TURNS[step.modifier] || 'Turn'} at the end of the road${onto}`;
+    case 'new name': return `Continue${along}`;
+    case 'continue': return `Continue${along}`;
+    default:
+      return `${TURNS[step.modifier] || 'Continue'}${step.modifier ? onto : along}`;
+  }
 }
 
 /** "via NH-33 · Ranchi Ring Road" — how a person names a route. */

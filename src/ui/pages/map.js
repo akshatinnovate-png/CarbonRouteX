@@ -14,6 +14,7 @@ import { clock, dur, kg as fkg, km as fkm, money, num, pct, stamp } from '../../
 import { vehicleColor } from '../../render/palette.js';
 import { icon } from '../icons.js';
 import { card, kv, empty, chip, statTile } from '../components.js';
+import { countTo, flashDelta, revealRoute } from '../motion.js';
 import { energyUnitLabel } from '../../engines/energy.js';
 
 export function mapPage(store, map) {
@@ -117,26 +118,53 @@ export function mapPage(store, map) {
 
   /* -------------------------------------------------- hero strip */
 
+  // `raw` and `fmt` are split so the readout can travel from its old value to
+  // its new one rather than snapping: after a re-plan, seeing cost fall is the
+  // information, and a figure that simply replaces itself does not show that.
   const HERO = [
-    { key: 'vehicles', label: 'Active', tone: 'cyan', get: (m) => `${m.activeVehicles}`, sub: (m) => `/ ${m.totalVehicles}` },
-    { key: 'deliveries', label: 'Deliveries', get: (m) => num(m.deliveries), sub: (m) => `· ${m.delivered} done` },
-    { key: 'onTime', label: 'On-time', tone: 'green', get: (m) => pct(m.onTimeRate, 1) },
-    { key: 'co2', label: 'CO₂e', tone: 'green', get: (m) => num(m.co2, 1), sub: () => 'kg' },
-    { key: 'km', label: 'Distance', get: (m) => num(m.km, 0), sub: () => 'km' },
-    { key: 'cost', label: 'Cost', tone: 'amber', get: (m) => money(m.cost) },
+    { key: 'vehicles', label: 'Active', tone: 'cyan', raw: (m) => m.activeVehicles, fmt: (v) => String(Math.round(v)), sub: (m) => `/ ${m.totalVehicles}` },
+    { key: 'deliveries', label: 'Deliveries', raw: (m) => m.deliveries, fmt: (v) => num(v), sub: (m) => `· ${m.delivered} done` },
+    { key: 'onTime', label: 'On-time', tone: 'green', raw: (m) => m.onTimeRate, fmt: (v) => pct(v, 1) },
+    { key: 'co2', label: 'CO₂e', tone: 'green', raw: (m) => m.co2, fmt: (v) => num(v, 1), sub: () => 'kg' },
+    { key: 'km', label: 'Distance', raw: (m) => m.km, fmt: (v) => num(v, 0), sub: () => 'km' },
+    { key: 'cost', label: 'Cost', tone: 'amber', raw: (m) => m.cost, fmt: (v) => money(v) },
   ];
+
+  /** Live value nodes, kept across renders so their numbers can be tweened. */
+  let heroCells = null;
 
   const renderHero = raf1(() => {
     if (!store.plan) {
       mount(hero, el('div.hero-empty', null,
         el('span', { html: icon('info', 14) }),
         el('span', { text: 'No plan yet — open Optimise and run the optimiser.' })));
+      heroCells = null;
       return;
     }
     const m = store.heroMetrics();
-    mount(hero, ...HERO.map((h) => el('div.hero-stat', { dataset: { tone: h.tone || '' } },
-      el('span.k', { text: h.label }),
-      el('span.v.num', null, h.get(m), h.sub ? el('small', { text: h.sub(m) }) : null))));
+
+    if (!heroCells || hero.childElementCount !== HERO.length) {
+      const cells = HERO.map((h) => el('div.hero-stat', { dataset: { tone: h.tone || '' } },
+        el('span.k', { text: h.label }),
+        el('span.v.num', null,
+          el('span.val', { text: h.fmt(h.raw(m)) }),
+          h.sub ? el('small', { text: h.sub(m) }) : null)));
+      mount(hero, ...cells);
+      heroCells = HERO.map((h, i) => ({
+        spec: h,
+        val: cells[i].querySelector('.val'),
+        sub: cells[i].querySelector('small'),
+      }));
+      return;
+    }
+
+    for (const cell of heroCells) {
+      const next = cell.spec.raw(m);
+      const changed = Math.abs((cell.val._countValue ?? next) - next) > 1e-9;
+      countTo(cell.val, next, cell.spec.fmt);
+      if (cell.sub && cell.spec.sub) setText(cell.sub, cell.spec.sub(m));
+      if (changed) flashDelta(cell.val);
+    }
   });
 
   /* ----------------------------------------------------- status */

@@ -11,14 +11,17 @@
  */
 
 import { PERSONAL_VEHICLES, PERSONAL_OPTIONS, APP } from '../../config.js';
-import { departureSweep } from '../../engines/personal.js';
+import { departureSweep, tripLedger } from '../../engines/personal.js';
 import { viaLabel } from '../../services/osrm.js';
 import { EV, emit, on } from '../../core/bus.js';
 import { el, mount, raf1, announce } from '../../util/dom.js';
 import { clock, dur, kg as fkg, money, num } from '../../util/format.js';
 import { icon } from '../icons.js';
-import { card, kv, empty, locationPicker, timeInput, chip } from '../components.js';
-import { focusEntity, frameNetwork, revealStagger, openPanel, reducedMotion } from '../motion.js';
+import { card, kv, empty, locationPicker, timeInput, chip, statTile } from '../components.js';
+import {
+  focusEntity, frameNetwork, revealStagger, openPanel, reducedMotion,
+  countTo, flashDelta, revealRoute, focusStep,
+} from '../motion.js';
 
 export function tripPage(store, map) {
   const canvas = document.getElementById('map-canvas');
@@ -175,7 +178,9 @@ export function tripPage(store, map) {
     const departMinutes = leaveNow ? null : departAt?.getMinutes();
     const trip = await store.planTrip({ origin, destination, departMinutes });
     if (trip) {
-      frameNetwork(map, trip.chosen?.trip?.points || [origin, destination], { padding: 130 });
+      // Frame first, then draw the line into the frame we just settled on.
+      await frameNetwork(map, trip.chosen?.trip?.points || [origin, destination], { padding: 130 });
+      revealRoute(map, { duration: 1000 });
       announce(`${trip.options.length} route options compared`);
       // The answer is below the form, so bring it into view rather than
       // leaving somebody to wonder whether anything happened.
@@ -196,9 +201,18 @@ export function tripPage(store, map) {
         el('p', { text: store.tripError }));
     }
     if (store.tripPending) {
-      return el('div.trip-loading', null,
-        el('div.progress', null, el('i', { style: { width: '45%' } })),
-        el('p.dim', { text: 'Asking the routing service for real road alternatives…' }));
+      // Skeletons in the shape of the answer, not a spinner: the layout does
+      // not jump when the real cards arrive, and the wait tells you what is
+      // being waited for.
+      return el('div.stack', null,
+        el('p.field-hint', { text: 'Asking the routing service for real road alternatives…' }),
+        el('div.route-options', null, ...PERSONAL_OPTIONS.map((o, i) => el('div.route-option.is-skeleton', {
+          style: { '--skeleton-delay': `${i * 90}ms` }, 'aria-hidden': 'true',
+        },
+        el('div.ro-head', null, el('span.sk.sk-title'), el('span.spacer'), el('span.sk.sk-pill')),
+        el('span.sk.sk-line'),
+        el('div.ro-metrics', null, ...Array.from({ length: 5 }, () => el('span.sk.sk-metric')))))),
+        el('span.sr-only', { role: 'status', text: 'Comparing routes' }));
     }
     const trip = store.trip;
     if (!trip) {
@@ -225,7 +239,8 @@ export function tripPage(store, map) {
         dataset: { selected: String(isChosen), sameroad: String(!isChosen && onChosenRoad) },
         onclick: () => {
           store.selectTripOption(o.key);
-          focusEntity(map, midpointOf(t.points) || trip.to, { zoom: map.zoom, pullback: false });
+          // Re-trace: the new choice draws itself over the old one.
+          revealRoute(map, { duration: 760 });
         },
       },
       el('div.ro-head', null,
@@ -266,7 +281,7 @@ export function tripPage(store, map) {
           'aria-current': String(t.id === trip.chosenRoadId),
           onclick: () => {
             store.selectTripRoad(t.id);
-            focusEntity(map, midpointOf(t.points) || trip.to, { zoom: map.zoom, pullback: false });
+            revealRoute(map, { duration: 760 });
           },
         },
         el('span.mini-bar', { style: { background: 'var(--teal)' } }),
@@ -277,6 +292,7 @@ export function tripPage(store, map) {
               + `arrives ${clock(Math.round(t.arriveMinutes))} · ${money(t.cost, 0)} · ${fkg(t.co2, 2)} CO₂e`,
           })))))) : null,
       departureCard(trip),
+      directionsCard(trip),
       chosen ? card('Why this route',
         chip(chosen.label, 'gold'),
         el('div.explain', null,
@@ -296,16 +312,111 @@ export function tripPage(store, map) {
               + 'CO₂e are estimates from published factors applied to that geometry, not measurements from '
               + 'your vehicle.',
         })) : null,
-      store.personal.history.length ? card('Recent journeys', null,
-        el('div.stack-sm', null, ...store.personal.history.slice(0, 5).map((h) => el('div.mini-row', null,
-          el('span.mini-bar', { style: { background: 'var(--teal)' } }),
-          el('span.mini-text', null,
-            el('strong', { text: `${h.from} → ${h.to}` }),
-            el('small', {
-              text: [h.km != null ? `${h.km.toFixed(1)} km` : null,
-                h.co2 != null ? `${h.co2.toFixed(2)} kg CO₂e` : null,
-                h.option ? optionLabel(h.option) : null].filter(Boolean).join(' · '),
-            })))))) : null);
+      ledgerCard());
+  }
+
+  /**
+   * The carbon ledger.
+   *
+   * A product named CarbonRoute that forgets every journey the moment you
+   * close it is not really keeping an account of anything. Two numbers here,
+   * deliberately kept apart: what these journeys actually emitted, which is a
+   * real total, and how much less that was than the worst road on offer at the
+   * time — a counterfactual, labelled as one. Driving a cleaner route than you
+   * might have is not the same as not driving, and the wording says so.
+   */
+  function ledgerCard() {
+    const ledger = tripLedger(store.personal.history);
+    if (!ledger.trips) return null;
+
+    const peak = Math.max(...ledger.recent.map((h) => h.co2), 1e-9);
+
+    return card(`Your carbon ledger (${ledger.trips} journey${ledger.trips === 1 ? '' : 's'})`,
+      ledger.comparable
+        ? chip(`cleanest road ${ledger.cleanestPicks}/${ledger.comparable}`, ledger.cleanestPicks === ledger.comparable ? 'gold' : '')
+        : null,
+      el('div.tile-row', null,
+        statTile('Emitted', fkg(ledger.emitted, 1), { sub: 'total' }),
+        statTile('Travelled', num(ledger.km, 0), { sub: 'km' }),
+        statTile('Per km', ledger.perKm.toFixed(3), { sub: 'kg CO₂e' }),
+        ledger.avoided > 0.005
+          ? statTile('Avoided', fkg(ledger.avoided, 2), { sub: 'vs worst road', tone: 'gold' })
+          : null),
+
+      // A bar per journey, newest last, so a run of heavy trips is visible as
+      // a shape rather than only as a total.
+      ledger.recent.length > 1
+        ? el('div.ledger-strip', { 'aria-hidden': 'true' },
+          ...[...ledger.recent].reverse().map((h) => el('span.ledger-bar', {
+            style: { height: `${18 + 82 * (h.co2 / peak)}%` },
+            title: `${h.from} → ${h.to} · ${fkg(h.co2, 2)}`,
+          })))
+        : null,
+
+      el('div.stack-sm', null, ...ledger.recent.slice(0, 5).map((h) => el('div.mini-row', null,
+        el('span.mini-bar', { style: { background: 'var(--teal)' } }),
+        el('span.mini-text', null,
+          el('strong', { text: `${h.from} → ${h.to}` }),
+          el('small', {
+            text: [
+              h.km != null ? `${h.km.toFixed(1)} km` : null,
+              h.co2 != null ? `${h.co2.toFixed(2)} kg CO₂e` : null,
+              h.option ? optionLabel(h.option) : null,
+              PERSONAL_VEHICLES[h.vehicleKey]?.label,
+            ].filter(Boolean).join(' · '),
+          }))))),
+
+      el('p.basis', {
+        text: ledger.avoided > 0.005
+          ? '“Avoided” compares each journey with the dirtiest road that was offered for it. '
+            + 'It is a comparison against a road not taken, not a reduction in absolute terms — '
+            + 'a cleaner drive is still a drive.'
+          : 'Totals are estimates from published factors applied to real road geometry, not measurements.',
+      }));
+  }
+
+  /**
+   * Turn-by-turn directions.
+   *
+   * The manoeuvre data arrives with the road names we already ask for, so not
+   * showing it would be withholding the one thing somebody needs in order to
+   * actually drive the route. It doubles as the text equivalent of the map:
+   * an ordered list that a screen reader can read straight through.
+   *
+   * Hovering or focusing a step holds that junction on the map, because
+   * "turn left onto NH-33" is only useful once you can see where.
+   */
+  function directionsCard(trip) {
+    const steps = trip.chosen?.trip?.steps || [];
+    if (!steps.length) return null;
+
+    const rows = steps.map((step, i) => el('li.dir-step', {
+      tabindex: '0',
+      onmouseenter: () => focusStep(map, step),
+      onmouseleave: () => focusStep(map, null),
+      onfocus: () => {
+        focusStep(map, step);
+        if (Number.isFinite(step.lon)) focusEntity(map, step, { zoom: 15, pullback: false });
+      },
+      onblur: () => focusStep(map, null),
+      onclick: () => {
+        if (Number.isFinite(step.lon)) focusEntity(map, step, { zoom: 16, pullback: false });
+      },
+    },
+    el('span.dir-index', { text: String(i + 1) }),
+    el('span.dir-body', null,
+      el('span.dir-text', { text: step.text }),
+      step.km > 0.01
+        ? el('span.dir-dist', { text: `${step.km < 1 ? `${Math.round(step.km * 1000)} m` : `${step.km.toFixed(1)} km`}` })
+        : null)));
+
+    return card(`Directions (${steps.length})`,
+      chip(`${trip.chosen.trip.km.toFixed(1)} km`, ''),
+      el('ol.dir-list', { 'aria-label': 'Turn by turn directions' }, ...rows),
+      el('p.basis', {
+        text: 'Hover or tab through a step to hold that junction on the map. '
+          + 'Directions come from the routing service; check signage against reality.',
+      }));
   }
 
   /**
@@ -400,17 +511,36 @@ export function tripPage(store, map) {
     revealStagger(panel.querySelectorAll('.route-option'));
   });
 
+  /** Hero figures are rebuilt only once; after that their values travel. */
+  let heroCells = null;
+
   function renderHero() {
     const host = document.getElementById('trip-hero');
     if (!host) return;
     const t = store.trip?.chosen?.trip;
-    if (!t) { mount(host); host.className = 'trip-hero'; return; }
-    host.className = 'trip-hero hero-strip';
-    mount(host,
-      stat('ETA', clock(Math.round(t.arriveMinutes)), '', 'gold'),
-      stat('Journey', dur(t.minutes, { compact: true }), ''),
-      stat('Distance', t.km.toFixed(1), 'km'),
-      stat('CO₂e', t.co2.toFixed(2), 'kg', 'green'));
+    if (!t) { mount(host); host.className = 'trip-hero'; heroCells = null; return; }
+
+    if (!heroCells || host.childElementCount === 0) {
+      host.className = 'trip-hero hero-strip';
+      const cells = {
+        eta: stat('ETA', '--:--', '', 'gold'),
+        journey: stat('Journey', '0m', ''),
+        km: stat('Distance', '0', 'km'),
+        co2: stat('CO₂e', '0.00', 'kg', 'green'),
+      };
+      mount(host, cells.eta, cells.journey, cells.km, cells.co2);
+      heroCells = Object.fromEntries(
+        Object.entries(cells).map(([k, node]) => [k, node.querySelector('.v .val')]),
+      );
+    }
+
+    // Counting these tells you the plan changed and roughly by how much —
+    // which is exactly what you are looking for after picking a new road.
+    countTo(heroCells.eta, t.arriveMinutes, (v) => clock(Math.round(v)));
+    countTo(heroCells.journey, t.minutes, (v) => dur(v, { compact: true }));
+    countTo(heroCells.km, t.km, (v) => v.toFixed(1));
+    countTo(heroCells.co2, t.co2, (v) => v.toFixed(2));
+    for (const node of Object.values(heroCells)) flashDelta(node);
     const attrib = document.getElementById('trip-attrib');
     if (attrib) {
       attrib.className = 'map-attrib attrib-bar';
@@ -424,7 +554,7 @@ export function tripPage(store, map) {
 
   const stat = (k, v, sub, tone = '') => el('div.hero-stat', { dataset: { tone } },
     el('span.k', { text: k }),
-    el('span.v', null, v, sub ? el('small', { text: sub }) : null));
+    el('span.v', null, el('span.val', { text: v }), sub ? el('small', { text: sub }) : null));
 
   on(EV.TRIP_CHANGED, render);
   on(EV.ENTITIES_CHANGED, render);
@@ -440,11 +570,6 @@ const nowMinutes = () => {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
 };
-
-function midpointOf(points) {
-  if (!points?.length) return null;
-  return points[Math.floor(points.length / 2)];
-}
 
 /**
  * The browser's own geolocation, reverse-geocoded to a readable place.

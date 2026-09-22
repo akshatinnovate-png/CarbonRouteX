@@ -168,6 +168,19 @@ log('  departure verdict:', (await page.locator('.dep-strip').locator('..').inne
 await page.locator('.dep-strip').scrollIntoViewIfNeeded();
 await page.waitForTimeout(500);
 await shot('07c-departure-sweep');
+log('  direction steps:', await page.locator('.dir-step').count());
+log('  first three:', (await page.locator('.dir-text').allInnerTexts()).slice(0, 3));
+if (await page.locator('.dir-step').count()) {
+  await page.locator('.dir-step').nth(2).hover();
+  await page.waitForTimeout(400);
+  log('  hovering a step holds it on the map:',
+    await page.evaluate(() => !!window.CarbonRoute.map.stepFocus));
+  await page.locator('.dir-list').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await shot('16-directions');
+} else {
+  errors.push('personal: no turn-by-turn directions were produced');
+}
 log('  roads found (status):', await page.locator('#ai-status .txt').innerText());
 log('  other roads listed:', await page.locator('.road-row').count());
 log('  why (roads):', (await page.locator('.drivers li').first().innerText()).replace(/\n/g, ' — '));
@@ -182,12 +195,50 @@ if (await page.locator('.road-row').count()) {
   await shot('07b-other-road');
 }
 
+// The route should trace itself onto the map, not simply appear.
+await page.locator('.route-option').nth(1).click();
+await page.waitForTimeout(90);
+const revealing = await page.evaluate(() => {
+  const r = window.CarbonRoute.map.reveal;
+  return r ? (performance.now() - r.start) / r.duration : null;
+});
+log('  route reveal in flight at:', revealing === null ? 'not running' : `${Math.round(revealing * 100)}%`);
+if (revealing === null) errors.push('motion: the route did not trace itself onto the map');
+await shot('17-route-reveal-midway');
+await page.waitForTimeout(900);
+log('  reveal finished and cleared:', await page.evaluate(() => window.CarbonRoute.map.reveal === null));
+
 // select a different option
 await page.locator('.route-option').nth(2).click();
 await page.waitForTimeout(900);
 log('  after selecting greenest, selected card:',
   await page.locator('.route-option[data-selected="true"] .ro-head strong').innerText().catch(() => '?'));
 await shot('08-trip-greenest');
+
+/* ---------------------------------------------------- carbon ledger */
+log('\n== CARBON LEDGER ==');
+// A second journey, so the ledger is a ledger and not a single row.
+await lookups.nth(1).locator('.lookup-chosen .btn').click().catch(() => {});
+await lookups.nth(1).locator('input[type="search"]').fill('Hitec City');
+await page.waitForTimeout(1600);
+await lookups.nth(1).locator('.lookup-item').first().click().catch(() => {});
+await page.waitForTimeout(400);
+await page.locator('.btn-optimize').click();
+await page.waitForTimeout(2600);
+
+const ledger = page.locator('.ledger-strip');
+log('  ledger present:', await ledger.count() > 0);
+log('  ledger bars:', await page.locator('.ledger-bar').count());
+const ledgerText = await page.locator('.ledger-strip').locator('..').innerText().catch(() => '');
+log('  ledger headline:', ledgerText.split('\n').slice(0, 2).join(' / '));
+if (/avoided/i.test(ledgerText)) {
+  const says = /comparison against a road not taken/i.test(ledgerText);
+  log('  "avoided" is labelled as a counterfactual:', says);
+  if (!says) errors.push('ledger: "avoided" is presented without saying what it is measured against');
+}
+await page.locator('.ledger-strip').scrollIntoViewIfNeeded().catch(() => {});
+await page.waitForTimeout(400);
+await shot('18-carbon-ledger');
 
 /* ---------------------------------------------------- garage */
 log('\n== GARAGE ==');
@@ -283,6 +334,18 @@ await page.getByRole('button', { name: /start optimising/i }).click();
 await page.waitForTimeout(400);
 await shot('14-reduced-motion-chooser');
 log('  chooser rendered:', await page.locator('.mode-card').count(), 'cards');
+
+// Reduced motion must mean "arrive at the end state", never "a half-drawn
+// route left on screen because the animation was skipped".
+const rmReveal = await page.evaluate(async () => {
+  const { revealRoute, reducedMotion } = await import('/src/ui/motion.js');
+  await revealRoute(window.CarbonRoute?.map || { invalidate() {} });
+  return { reduced: reducedMotion(), leftover: window.CarbonRoute?.map?.reveal ?? null };
+}).catch((e) => ({ error: String(e) }));
+log('  reduced motion detected:', rmReveal.reduced);
+log('  no half-drawn route left behind:', rmReveal.leftover === null);
+if (rmReveal.reduced !== true) errors.push('motion: prefers-reduced-motion was not detected');
+if (rmReveal.leftover !== null) errors.push('motion: a reveal was left in flight under reduced motion');
 
 log('\n== ERRORS ==');
 log(errors.length ? errors.slice(0, 20).join('\n') : '  none');

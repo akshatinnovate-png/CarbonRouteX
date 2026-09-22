@@ -17,7 +17,7 @@ import { comparePlans, explainRoute, planDiff, explainCarbon } from '../src/engi
 import { edgeEnergy, speedFactor, gradeFactor, unitsToFraction } from '../src/engines/energy.js';
 import { intensityAt, co2e, cleanestHour } from '../src/engines/emissions.js';
 import {
-  buildTripOptions, evaluateTrip, compareTrips, explainTrip, departureSweep,
+  buildTripOptions, evaluateTrip, compareTrips, explainTrip, departureSweep, tripLedger,
 } from '../src/engines/personal.js';
 import { emptyWorkspace, importWorkspace, exportWorkspace } from '../src/core/storage.js';
 import { PRESETS, VEHICLE_TYPES, SIM, PERSONAL_VEHICLES } from '../src/config.js';
@@ -1137,6 +1137,53 @@ suite('Personal trip engine', () => {
     assert(set.estimated, 'the set is flagged as estimated');
     const drivers = explainTrip(set.options[0], set);
     assert(drivers.some((d) => /straight-line estimate/i.test(d.label)), 'and said so in the explanation');
+  });
+});
+
+suite('Carbon ledger', () => {
+  const HISTORY = [
+    { at: 5, from: 'A', to: 'B', km: 10, co2: 2.0, co2Best: 2.0, co2Worst: 3.0, roadsFound: 3, vehicleKey: 'CAR' },
+    { at: 4, from: 'B', to: 'C', km: 20, co2: 4.5, co2Best: 4.0, co2Worst: 5.0, roadsFound: 2, vehicleKey: 'CAR' },
+    { at: 3, from: 'C', to: 'D', km: 5, co2: 0, co2Best: 0, co2Worst: 0, roadsFound: 1, vehicleKey: 'BIKE' },
+  ];
+
+  test('totals are the real sum of what was emitted', () => {
+    const l = tripLedger(HISTORY);
+    equal(l.trips, 3, 'every costed journey counts');
+    close(l.emitted, 6.5, 1e-9, 'emissions add up exactly');
+    close(l.km, 35, 1e-9, 'so does distance');
+    close(l.perKm, 6.5 / 35, 1e-9, 'intensity is derived, not stored');
+  });
+
+  test('"avoided" measures against the worst road offered, and nothing else', () => {
+    const l = tripLedger(HISTORY);
+    // 1.0 from the first journey, 0.5 from the second, 0 from the bike.
+    close(l.avoided, 1.5, 1e-9, 'only the gap to the dirtiest option counts');
+    assert(l.avoided < l.emitted, 'avoiding a worse road is never a claim of having emitted less');
+  });
+
+  test('only journeys that offered a choice are scored on the choice', () => {
+    const l = tripLedger(HISTORY);
+    equal(l.comparable, 2, 'the single-road journey cannot be scored');
+    equal(l.cleanestPicks, 1, 'and only one of the other two took the cleanest road');
+  });
+
+  test('an empty or uncosted history produces zeroes, not NaN', () => {
+    for (const h of [[], undefined, [{ from: 'A', to: 'B' }]]) {
+      const l = tripLedger(h);
+      equal(l.trips, 0, 'no journeys');
+      equal(l.emitted, 0, 'no emissions');
+      equal(l.avoided, 0, 'nothing avoided');
+      assert(Number.isFinite(l.perKm ?? 0), 'and no NaN leaks into the UI');
+    }
+  });
+
+  test('vehicles are broken out, dirtiest first', () => {
+    const l = tripLedger(HISTORY);
+    equal(l.byVehicle[0].key, 'CAR', 'the car did the damage');
+    close(l.byVehicle[0].co2, 6.5, 1e-9, 'all of it');
+    equal(l.byVehicle[1].key, 'BIKE', 'and the bicycle is still listed');
+    equal(l.byVehicle[1].co2, 0, 'at zero');
   });
 });
 
