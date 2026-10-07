@@ -683,8 +683,11 @@ The mock deliberately behaves like the *stingy* public OSRM: the `alternatives`
 request returns one road, and only a via-point request finds another. That is
 the case the application has to handle well, so it is the case the test pins.
 
-Set `CARBONROUTE_SHOTS=/some/dir` to save screenshots, and
-`CARBONROUTE_CHROMIUM` to use a browser you already have.
+Set `CARBONROUTE_SHOTS=/some/dir` to save screenshots,
+`CARBONROUTE_CHROMIUM` to use a browser you already have, and
+`CARBONROUTE_URL` to point it somewhere else — which is worth doing from a
+subdirectory, since that is how GitHub Pages serves the site and it is the one
+way a stray root-absolute path shows itself.
 
 ## Limitations
 

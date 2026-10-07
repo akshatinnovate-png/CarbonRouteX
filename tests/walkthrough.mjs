@@ -338,7 +338,10 @@ log('  chooser rendered:', await page.locator('.mode-card').count(), 'cards');
 // Reduced motion must mean "arrive at the end state", never "a half-drawn
 // route left on screen because the animation was skipped".
 const rmReveal = await page.evaluate(async () => {
-  const { revealRoute, reducedMotion } = await import('/src/ui/motion.js');
+  // Resolved against the page, not the server root: GitHub Pages serves this
+  // application from /<repo>/, and a root-absolute import would 404 there.
+  const url = new URL('src/ui/motion.js', document.baseURI).href;
+  const { revealRoute, reducedMotion } = await import(url);
   await revealRoute(window.CarbonRoute?.map || { invalidate() {} });
   return { reduced: reducedMotion(), leftover: window.CarbonRoute?.map?.reveal ?? null };
 }).catch((e) => ({ error: String(e) }));
