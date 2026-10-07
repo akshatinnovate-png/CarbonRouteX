@@ -1,0 +1,64 @@
+# Deploy CarbonRoute to GitHub Pages.
+#
+# There is no build step and there are no dependencies: the repository already
+# contains a working site. So this workflow does two things — it runs the
+# engine test suite, and it publishes the application files. A push that breaks
+# the maths does not reach the public URL.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it half-published, but
+# never queue more than one behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No install step: the suite has no dependencies, by design.
+      - run: node tests/engines.test.mjs
+
+  deploy:
+    name: Publish
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage the site
+        run: |
+          mkdir -p _site
+          cp -r index.html src styles _site/
+          cp README.md _site/ 2>/dev/null || true
+          # Pages runs Jekyll over the artifact unless told otherwise, and
+          # Jekyll silently drops files and folders beginning with an
+          # underscore. Nothing here starts with one today; this makes sure a
+          # future file named _anything still gets served.
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

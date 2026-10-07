@@ -2,6 +2,8 @@
 
 ### Optimize the Network. Not Just the Route.
 
+**Live: <https://akshatinnovate-png.github.io/CarbonRouteX/>**
+
 **Route intelligence over real satellite imagery and real roads, optimising time,
 cost and carbon at the same time — for one journey, or for an entire fleet.**
 
@@ -552,6 +554,21 @@ Runtime settings live in the Settings tab and persist locally: basemap provider
 import/export.
 
 ## Deployment
+
+CarbonRoute is a static site with no build step, so deployment is a file copy.
+
+**GitHub Pages** is wired up in `.github/workflows/pages.yml`: every push to
+`main` runs the engine suite and, only if it passes, publishes `index.html`,
+`src/` and `styles/`. A push that breaks the maths does not reach the public
+URL. The repository also carries a root `.nojekyll`, so the site serves
+correctly whether Pages is set to *GitHub Actions* or to *Deploy from a branch*
+— Jekyll would otherwise silently drop any path beginning with an underscore.
+
+One thing to know about the public deployment: it talks to the free public
+OSRM and Nominatim instances, which are rate limited and ask that heavy users
+run their own. A demo is fine; real traffic is not. Settings lets you point
+both at your own endpoints without touching the code.
+
 
 Any static host. No server component, no API key, no build step.
 
